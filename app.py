@@ -36,7 +36,7 @@ def GPT_response(text):
             {"role": "user", "content": text}
         ],
         temperature=0.5, 
-        max_tokens=500
+        max_completion_tokens=500
     )
     print(response)
     
@@ -71,7 +71,7 @@ def handle_message(event):
         line_bot_api.reply_message(event.reply_token, TextSendMessage(GPT_answer))
     except:
         print(traceback.format_exc())
-        line_bot_api.reply_message(event.reply_token, TextSendMessage('你所使用的OPENAI API key額度可能已經超過，請於後台Log內確認錯誤訊息'))
+        line_bot_api.reply_message(event.reply_token, TextSendMessage('此服務目前不通...請稍後再試!'))
         
 
 @handler.add(PostbackEvent)
