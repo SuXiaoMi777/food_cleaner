@@ -67,7 +67,11 @@ def handle_message(event):
     msg = event.message.text
     try:
         GPT_answer = GPT_response(msg)
-        print(GPT_answer)
+        print(f'AI 回應:{GPT_answer}')
+
+        if not GPT_answer or GPT_answer.strip() == "":
+            GPT_answer = "抱歉，我剛剛腦筋一片空白，可以請你再輸入一次嗎？"
+            
         line_bot_api.reply_message(event.reply_token, TextSendMessage(GPT_answer))
     except:
         print(traceback.format_exc())
