@@ -26,12 +26,22 @@ handler = WebhookHandler(os.getenv('CHANNEL_SECRET'))
 openai.api_key = os.getenv('OPENAI_API_KEY')
 
 
+
 def GPT_response(text):
-    # 接收回應
-    response = openai.Completion.create(model="gpt-3.5-turbo-instruct", prompt=text, temperature=0.5, max_tokens=500)
+    # 接收回應 (改用 ChatCompletion 寫法)
+    response = openai.ChatCompletion.create(
+        model="gpt-5-nano", # 填入你想要使用的模型名稱
+        messages=[
+            {"role": "system", "content":"你是一個營養師，你的任務是用有限的食材讓使用者吃到美味健康的一餐"},
+            {"role": "user", "content": text}
+        ],
+        temperature=0.5, 
+        max_tokens=500
+    )
     print(response)
-    # 重組回應
-    answer = response['choices'][0]['text'].replace('。','')
+    
+    # 重組回應 (ChatCompletion 的回傳 JSON 結構與以往不同，需改為 ['message']['content'])
+    answer = response['choices'][0]['message']['content'].replace('。','')
     return answer
 
 
