@@ -35,7 +35,7 @@ def GPT_response(text):
             {"role": "system", "content":"你是一個營養師，你的任務是用有限的食材讓使用者吃到美味健康的一餐"},
             {"role": "user", "content": text}
         ],
-        temperature=0.5, 
+        # temperature=0.5, 
         max_completion_tokens=500
     )
     print(response)
