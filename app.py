@@ -41,7 +41,7 @@ def GPT_response(text):
     print(response)
     
     # 重組回應 (ChatCompletion 的回傳 JSON 結構與以往不同，需改為 ['message']['content'])
-    answer = response['choices'][0]['message']['content'].replace('。','')
+    answer = response['choices'][0]['message']['content']
     return answer
 
 
@@ -71,7 +71,7 @@ def handle_message(event):
 
         if not GPT_answer or GPT_answer.strip() == "":
             GPT_answer = "抱歉，我剛剛腦筋一片空白，可以請你再輸入一次嗎？"
-            
+
         line_bot_api.reply_message(event.reply_token, TextSendMessage(GPT_answer))
     except:
         print(traceback.format_exc())
