@@ -36,7 +36,7 @@ def GPT_response(text):
             {"role": "user", "content": text}
         ],
         # temperature=0.5, 
-        max_completion_tokens=500
+        # max_completion_tokens=500
     )
     print(response)
     
