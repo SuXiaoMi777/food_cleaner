@@ -18,7 +18,19 @@ import base64
 import requests
 #======python的函數庫==========
 
+# === 新增 Firebase 套件 ===
+import firebase_admin
+from firebase_admin import credentials
+from firebase_admin import firestore
+#==========================
+
 app = Flask(__name__)
+
+firebase_key_path = os.getenv('FIREBASE_KEY_PATH')
+cred = credentials.Certificate(firebase_key_path)
+firebase_admin.initialize_app(cred)
+db = firestore.client()
+
 static_tmp_path = os.path.join(os.path.dirname(__file__), 'static', 'tmp')
 # Channel Access Token
 line_bot_api = LineBotApi(os.getenv('CHANNEL_ACCESS_TOKEN'))
@@ -28,6 +40,38 @@ handler = WebhookHandler(os.getenv('CHANNEL_SECRET'))
 openai.api_key = os.getenv('OPENAI_API_KEY')
 
 
+
+def save_user_meal(user_id, recipe_result):
+    """將這次生成的食譜寫入資料庫"""
+    try:
+        # 路徑：users(集合) -> user_id(文件) -> meals(集合) -> 自動產生的ID(文件)
+        doc_ref = db.collection('users').document(user_id).collection('meals').document()
+        doc_ref.set({
+            'recipe': recipe_result,
+            'timestamp': firestore.SERVER_TIMESTAMP # 讓資料庫自動押上時間
+        })
+    except Exception as e:
+        print(f"寫入資料庫失敗: {e}")
+
+def get_recent_meals(user_id):
+    """撈取該使用者最近 3 次的飲食紀錄"""
+    try:
+        meals_ref = db.collection('users').document(user_id).collection('meals')
+        # 依照時間排序（新到舊），只取前 3 筆以節省 Token
+        query = meals_ref.order_by('timestamp', direction=firestore.Query.DESCENDING).limit(3)
+        results = query.stream()
+        
+        past_meals = []
+        for doc in results:
+            data = doc.to_dict()
+            past_meals.append(data.get('recipe', ''))
+            
+        if not past_meals:
+            return "目前沒有近期飲食紀錄。"
+        return "\n".join(past_meals)
+    except Exception as e:
+        print(f"讀取資料庫失敗: {e}")
+        return "無法讀取歷史紀錄。"
 
 def GPT_response(text):
     # 接收回應 (改用 ChatCompletion 寫法)
@@ -72,24 +116,26 @@ def handle_image_message(event):
         # 2. 將二進位圖片資料轉換為 Base64 字串 (OpenAI 接收的格式)
         base64_image = base64.b64encode(image_data).decode('utf-8')
         
+        # 撈取近期歷史紀錄
+        past_meals_str = get_recent_meals(user_id)
+
         # 3. 將圖片與 Prompt 結合，送給 OpenAI (使用支援視覺的 gpt-4o-mini)
         response = openai.ChatCompletion.create(
             model="gpt-4o-mini",
             messages=[
                 {
+                    "role": "system",
+                    "content": f"""你是一位專業的營養師與主廚。
+                    【使用者近期飲食紀錄】：\n{past_meals_str}
+                    【任務】：
+                    1. 根據使用者的近期飲食，判斷缺乏哪些營養素並在這次食譜中優先補足。
+                    2. 嚴格遵守食材搭配的合理性，不應該出現奇怪的搭配。"""
+                },
+                {
                     "role": "user",
                     "content": [
-                        {
-                            "type": "text", 
-                            "text": "你是一個專業的廚師。請辨識這張圖片中有哪些食材，並用這些食材幫我構想 2 ~ 3 道簡單的食譜，並且列出菜名與簡單的步驟。"
-                        },
-                        {
-                            "type": "image_url",
-                            "image_url": {
-                                "url": f"data:image/jpeg;base64,{base64_image}",
-                                "detail": "low" # 使用 low 模式能大幅節省 Token 花費
-                            }
-                        }
+                        {"type": "text", "text": "請辨識圖片食材，幫我構想 2 道食譜。"},
+                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}", "detail": "low"}}
                     ]
                 }
             ],
@@ -105,6 +151,8 @@ def handle_image_message(event):
             event.reply_token, 
             TextSendMessage(text=recipe_answer)
         )
+        # 5. 將這次的食譜寫入資料庫
+        save_user_meal(user_id, recipe_answer)
 
     except Exception as e:
         print(traceback.format_exc())
