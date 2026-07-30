@@ -14,6 +14,7 @@ import datetime
 import openai
 import time
 import traceback
+import base64
 #======python的函數庫==========
 
 app = Flask(__name__)
@@ -43,6 +44,60 @@ def GPT_response(text):
     # 重組回應 (ChatCompletion 的回傳 JSON 結構與以往不同，需改為 ['message']['content'])
     answer = response['choices'][0]['message']['content']
     return answer
+
+# 監聽圖片訊息
+@handler.add(MessageEvent, message=ImageMessage)
+def handle_image_message(event):
+    try:
+        # 1. 向 LINE 伺服器請求下載使用者傳送的圖片
+        message_content = line_bot_api.get_message_content(event.message.id)
+        image_data = b""
+        for chunk in message_content.iter_content():
+            image_data += chunk
+            
+        # 2. 將二進位圖片資料轉換為 Base64 字串 (OpenAI 接收的格式)
+        base64_image = base64.b64encode(image_data).decode('utf-8')
+        
+        # 3. 將圖片與 Prompt 結合，送給 OpenAI (使用支援視覺的 gpt-4o-mini)
+        response = openai.ChatCompletion.create(
+            model="gpt-4o-mini",
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "text", 
+                            "text": "你是一個專業的廚師。請辨識這張圖片中有哪些食材，並用這些食材幫我構想 2 ~ 3 道簡單的食譜，並且列出菜名與簡單的步驟。"
+                        },
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:image/jpeg;base64,{base64_image}",
+                                "detail": "low" # 使用 low 模式能大幅節省 Token 花費
+                            }
+                        }
+                    ]
+                }
+            ],
+            max_tokens=800,
+            temperature=0.5
+        )
+        
+        # 4. 擷取 AI 的回覆並傳送給使用者
+        recipe_answer = response['choices'][0]['message']['content']
+        print(f"AI 食譜回應：\n{recipe_answer}")
+        
+        line_bot_api.reply_message(
+            event.reply_token, 
+            TextSendMessage(text=recipe_answer)
+        )
+
+    except Exception as e:
+        print(traceback.format_exc())
+        line_bot_api.reply_message(
+            event.reply_token, 
+            TextSendMessage('抱歉，在處理圖片時發生了一點問題，請稍後再試！')
+        )
 
 
 # 監聽所有來自 /callback 的 Post Request
