@@ -15,6 +15,7 @@ import openai
 import time
 import traceback
 import base64
+import requests
 #======python的函數庫==========
 
 app = Flask(__name__)
@@ -49,6 +50,19 @@ def GPT_response(text):
 @handler.add(MessageEvent, message=ImageMessage)
 def handle_image_message(event):
     try:
+        user_id = event.source.user_id # 取得使用者 ID
+        loading_url = "https://api.line.me/v2/bot/chat/loading/start"
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {os.getenv('CHANNEL_ACCESS_TOKEN')}"
+        }
+        data = {
+            "chatId": user_id,
+            "loadingSeconds": 20 # 動畫顯示秒數 (最高 20)
+        }
+        # 送出請求，使用者的 LINE 畫面會立刻出現「...」動畫
+        requests.post(loading_url, headers=headers, json=data)
+
         # 1. 向 LINE 伺服器請求下載使用者傳送的圖片
         message_content = line_bot_api.get_message_content(event.message.id)
         image_data = b""
@@ -121,6 +135,19 @@ def callback():
 def handle_message(event):
     msg = event.message.text
     try:
+        user_id = event.source.user_id # 取得使用者 ID
+        loading_url = "https://api.line.me/v2/bot/chat/loading/start"
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {os.getenv('CHANNEL_ACCESS_TOKEN')}"
+        }
+        data = {
+            "chatId": user_id,
+            "loadingSeconds": 20 # 動畫顯示秒數 (最高 20)
+        }
+        # 送出請求，使用者的 LINE 畫面會立刻出現「...」動畫
+        requests.post(loading_url, headers=headers, json=data)
+
         GPT_answer = GPT_response(msg)
         print(f'AI 回應:{GPT_answer}')
 
