@@ -203,12 +203,12 @@ def handle_image_message(event):
                 {
                     "role": "user",
                     "content": [
-                        {"type": "text", "text": "請辨識這張圖片中的主要食材，並「只」回傳用空格分隔的食材名稱（例如：番茄 雞蛋 蔥）。不要輸出任何其他說明文字。"},
-                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}", "detail": "low"}}
+                        {"type": "text", "text": "請仔細觀察這張圖片中，並「只」回傳用空格分隔的食材名稱（如：番茄 雞蛋 蔥）。不要輸出任何其他說明文字。"},
+                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}", "detail": "high"}}
                     ]
                 }
             ],
-            temperature=0.2 # 降低隨機性，讓輸出更穩定
+            temperature=0.0 # 不具備隨機性，只輸出肯定的東西
         )
         ingredients_str = res_ingredients['choices'][0]['message']['content'].strip()
         print(f"辨識出食材：{ingredients_str}")
@@ -224,12 +224,14 @@ def handle_image_message(event):
                     "role": "system",
                     "content": f"""你是一位專業的營養師與主廚。
                     【使用者近期飲食紀錄】：\n{past_meals_str}
-                    【真實 Cookpad 搜尋結果】：\n{cookpad_results}
+                    【使用者現有的食材】：\n{ingredients_str}
+                    【Cookpad 搜尋結果】：\n{cookpad_results}
                     
                     【任務】：
-                    1. 優先參考「Cookpad 搜尋結果」來決定今天的食譜，並結合使用者的近期飲食給予合適的搭配。若無搜尋結果再自行發揮。
-                    2. 根據使用者的近期飲食，判斷缺乏哪些營養素並在這次食譜中優先補足。
-                    3. 請你「絕對只能」輸出 JSON 格式，不要包含 Markdown 標記，格式如下：
+                    1. 核心鐵律：你「必須、絕對要」使用【使用者現有的食材】來作為這道菜的主要材料！
+                    2. 優先參考【Cookpad 搜尋結果】中的菜名與作法來設計食譜，確保這是一道真實存在且能煮出來的料理。
+                    3. 根據【使用者近期飲食紀錄】：給予合適的搭配與營養考量
+                    4. 請你「絕對只能」輸出 JSON 格式，不要包含 Markdown 標記，格式如下：
                     {{
                       "recipe_name": "菜名",
                       "style": "日式 / 中式 / 西式",
@@ -241,7 +243,7 @@ def handle_image_message(event):
                 }
             ],
             max_tokens=800,
-            temperature=0.5
+            temperature=0.4
         )
         
         ai_raw_text = response['choices'][0]['message']['content']
