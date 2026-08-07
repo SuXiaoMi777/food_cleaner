@@ -100,6 +100,39 @@ def update_meal_status(user_id, doc_id, is_satisfied):
     except Exception as e:
         print(f"更新資料庫狀態失敗: {e}")
 
+def search_cookpad_recipes(ingredients_str):
+    """利用 Google Custom Search API 搜尋 Cookpad 網站的真實食譜"""
+    api_key = os.getenv('GOOGLE_SEARCH_API_KEY')
+    cx = os.getenv('GOOGLE_SEARCH_CX')
+    
+    if not api_key or not cx:
+        print("尚未設定 Google Search 金鑰")
+        return "無網路搜尋結果"
+
+    url = "https://www.googleapis.com/customsearch/v1"
+    params = {
+        'key': api_key,
+        'cx': cx,
+        'q': ingredients_str, # 搜尋關鍵字 (例如: 番茄 雞蛋)
+        'num': 3 # 抓取最相關的前 3 筆即可
+    }
+    
+    try:
+        response = requests.get(url, params=params)
+        data = response.json()
+        items = data.get('items', [])
+        
+        if not items:
+            return "查無相關食譜"
+            
+        search_results = ""
+        for i, item in enumerate(items):
+            search_results += f"【參考食譜 {i+1}】\n菜名：{item.get('title')}\n網址：{item.get('link')}\n\n"
+        return search_results
+    except Exception as e:
+        print(f"Google 搜尋發生錯誤: {e}")
+        return "搜尋功能異常"
+
 def get_recent_meals(user_id):
     try:
         meals_ref = db.collection('users').document(user_id).collection('meals')
@@ -161,8 +194,26 @@ def handle_image_message(event):
             
         # 2. 將二進位圖片資料轉換為 Base64 字串 (OpenAI 接收的格式)
         base64_image = base64.b64encode(image_data).decode('utf-8')
-        
-        # 撈取近期歷史紀錄
+
+        # 階段一：請 AI「只」辨識食材
+        # ==========================================
+        res_ingredients = openai.ChatCompletion.create(
+            model="gpt-4o-mini",
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": "請辨識這張圖片中的主要食材，並「只」回傳用空格分隔的食材名稱（例如：番茄 雞蛋 蔥）。不要輸出任何其他說明文字。"},
+                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}", "detail": "low"}}
+                    ]
+                }
+            ],
+            temperature=0.2 # 降低隨機性，讓輸出更穩定
+        )
+        ingredients_str = res_ingredients['choices'][0]['message']['content'].strip()
+        print(f"辨識出食材：{ingredients_str}")
+
+        cookpad_results = search_cookpad_recipes(ingredients_str)
         past_meals_str = get_recent_meals(user_id)
 
         # 3. 將圖片與 Prompt 結合，送給 OpenAI (使用支援視覺的 gpt-4o-mini)
@@ -171,27 +222,22 @@ def handle_image_message(event):
             messages=[
                 {
                     "role": "system",
-                    # 注意 JSON 的外層大括號要變成 {{ }} 才能在 f-string 中正常運作
                     "content": f"""你是一位專業的營養師與主廚。
                     【使用者近期飲食紀錄】：\n{past_meals_str}
+                    【真實 Cookpad 搜尋結果】：\n{cookpad_results}
+                    
                     【任務】：
-                    1. 根據使用者的近期飲食，判斷缺乏哪些營養素並在這次食譜中優先補足。
-                    2. 嚴格遵守食材搭配的合理性。
-                    3. 請你「絕對只能」輸出 JSON 格式，不要包含任何其他說明文字（不要加上 markdown 標記），格式如下：
+                    1. 優先參考「Cookpad 搜尋結果」來決定今天的食譜，並結合使用者的近期飲食給予合適的搭配。若無搜尋結果再自行發揮。
+                    2. 根據使用者的近期飲食，判斷缺乏哪些營養素並在這次食譜中優先補足。
+                    3. 請你「絕對只能」輸出 JSON 格式，不要包含 Markdown 標記，格式如下：
                     {{
                       "recipe_name": "菜名",
                       "style": "日式 / 中式 / 西式",
-                      "category": "肉類料理 / 蔬菜料理 / 海鮮",
+                      "category": "肉類料理 / 蔬菜料理 / 海鮮料理",
                       "ingredients": ["食材A", "食材B"],
-                      "steps": ["1. 步驟一", "2. 步驟二"]
+                      "steps": ["1. 步驟一", "2. 步驟二"],
+                      "source_url": "參考食譜的網址(若無請填無)"
                     }}"""
-                },
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": "請辨識圖片食材並產出 1 道食譜。"},
-                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}", "detail": "low"}}
-                    ]
                 }
             ],
             max_tokens=800,
@@ -199,39 +245,33 @@ def handle_image_message(event):
         )
         
         ai_raw_text = response['choices'][0]['message']['content']
-        print(f"AI 原始回應：\n{ai_raw_text}")
         
+        # 4. JSON 解析與排版
         try:
-            # 預防 AI 加上 ```json 標籤，先將其剃除
             clean_json_str = ai_raw_text.replace("```json", "").replace("```", "").strip()
-            
-            # 將字串轉換為字典 (Dictionary)
             recipe_data = json.loads(clean_json_str)
             
-            # 組合出要傳給使用者的文字 (可以自己排版得漂亮一點)
+            # 排版字串 (加入了來源網址)
             reply_text = f"為您推薦：【{recipe_data['recipe_name']}】\n"
             reply_text += f"風格：{recipe_data['style']} | {recipe_data['category']}\n\n"
             reply_text += "🥗 食材：\n" + "、".join(recipe_data['ingredients']) + "\n\n"
-            reply_text += "🍳 步驟：\n" + "\n".join(recipe_data['steps'])
+            reply_text += "🍳 步驟：\n" + "\n".join(recipe_data['steps']) + "\n\n"
+            reply_text += f"🔗 參考來源：\n{recipe_data.get('source_url', '無')}"
             
-            # 4. 先將「結構化的字典 (recipe_data)」存入資料庫為 pending 狀態
-            # 注意：這裡原本是存 recipe_answer (純字串)，現在改存 recipe_data (字典)
             doc_id = save_pending_meal(user_id, recipe_data)
             
             text_message = TextSendMessage(
-                # 在食譜最後加上一句問候
-                text=reply_text + "\n\n您對這次的食譜滿意嗎？（滿意才會存入您的飲食記憶喔！）",
+                text=reply_text + "\n\n您對這次的食譜滿意嗎？滿意才會存入喔！",
                 quick_reply=QuickReply(items=[
                     QuickReplyButton(action=PostbackAction(label="滿意", data=f"satisfy&{doc_id}")),
                     QuickReplyButton(action=PostbackAction(label="不滿意", data=f"unsatisfy&{doc_id}"))
                 ])
             )
             
-            # 6. 傳送給使用者
             line_bot_api.reply_message(event.reply_token, text_message)
             
         except json.JSONDecodeError as e:
-            print(f"JSON 解析失敗: {e}")
+            print(f"JSON 解析失敗: {e}\nAI 原始回應: {ai_raw_text}")
             line_bot_api.reply_message(
                 event.reply_token, 
                 TextSendMessage('抱歉，小助手剛剛整理食譜格式時出錯了，請再試一次！')
