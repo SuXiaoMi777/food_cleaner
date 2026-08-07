@@ -241,11 +241,12 @@ def handle_message(event):
                 event.reply_token, 
                 TextSendMessage(f"您還未有已儲存菜譜哦")
             )
-            print(f"您的近期紀錄如下：\n{history}")
-            line_bot_api.reply_message(
-                event.reply_token, 
-                TextSendMessage(f"您的近期紀錄如下：\n{history}")
-            )
+            else:
+                print(f"您的近期紀錄如下：\n{history}")
+                line_bot_api.reply_message(
+                    event.reply_token, 
+                    TextSendMessage(f"您的近期紀錄如下：\n{history}")
+                )
             
         elif msg == "輸入我吃過的東西":
             print("請直接打字告訴我您今天吃了什麼，或是傳食物照片給我喔！")
