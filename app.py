@@ -145,6 +145,7 @@ def get_recent_meals(user_id):
             past_meals.append(data.get('recipe', ''))
             
         if not past_meals:
+            print("目前沒有近期飲食紀錄。")
             return "目前沒有近期飲食紀錄。"
         return "\n".join(past_meals)
         
@@ -216,6 +217,8 @@ def handle_image_message(event):
         cookpad_results = search_cookpad_recipes(ingredients_str)
         past_meals_str = get_recent_meals(user_id)
 
+        print(f"參考：{cookpad_results},使用者之前吃過{past_meals_str}")
+
         # 3. 將圖片與 Prompt 結合，送給 OpenAI (使用支援視覺的 gpt-4o-mini)
         response = openai.ChatCompletion.create(
             model="gpt-4o-mini",
@@ -228,8 +231,8 @@ def handle_image_message(event):
                     【Cookpad 搜尋結果】：\n{cookpad_results}
                     
                     【任務】：
-                    1. 核心鐵律：你「必須、絕對要」使用【使用者現有的食材】來作為這道菜的主要材料！
-                    2. 優先參考【Cookpad 搜尋結果】中的菜名與作法來設計食譜，確保這是一道真實存在且能煮出來的料理。
+                    1. 核心鐵律：你「必須、絕對要」使用【使用者現有的食材】來作為這道菜的主要材料，但為了搭配合理性可以不用將全部食材用在一道菜！
+                    2. 優先參考【Cookpad 搜尋結果】中的菜名與作法來設計食譜，確保這是一道真實存在且能煮出來的料理，若有參考一定要提供來源。
                     3. 根據【使用者近期飲食紀錄】：給予合適的搭配與營養考量
                     4. 請你「絕對只能」輸出 JSON 格式，不要包含 Markdown 標記，格式如下：
                     {{
@@ -238,7 +241,7 @@ def handle_image_message(event):
                       "category": "肉類料理 / 蔬菜料理 / 海鮮料理",
                       "ingredients": ["食材A", "食材B"],
                       "steps": ["1. 步驟一", "2. 步驟二"],
-                      "source_url": "參考食譜的網址(若無請填無)"
+                      "source_url": "參考食譜的網址(真的沒有才填無)"
                     }}"""
                 }
             ],
@@ -256,14 +259,14 @@ def handle_image_message(event):
             # 排版字串 (加入了來源網址)
             reply_text = f"為您推薦：【{recipe_data['recipe_name']}】\n"
             reply_text += f"風格：{recipe_data['style']} | {recipe_data['category']}\n\n"
-            reply_text += "🥗 食材：\n" + "、".join(recipe_data['ingredients']) + "\n\n"
+            reply_text += "🥗 系統辨識出您有食材：\n" + "、".join(recipe_data['ingredients']) + "\n\n"
             reply_text += "🍳 步驟：\n" + "\n".join(recipe_data['steps']) + "\n\n"
             reply_text += f"🔗 參考來源：\n{recipe_data.get('source_url', '無')}"
             
             doc_id = save_pending_meal(user_id, recipe_data)
             
             text_message = TextSendMessage(
-                text=reply_text + "\n\n您對這次的食譜滿意嗎？滿意才會存入喔！",
+                text=reply_text + "\n\n您對這次的食譜滿意嗎？滿意才會存入飲食記憶喔！",
                 quick_reply=QuickReply(items=[
                     QuickReplyButton(action=PostbackAction(label="滿意", data=f"satisfy&{doc_id}")),
                     QuickReplyButton(action=PostbackAction(label="不滿意", data=f"unsatisfy&{doc_id}"))
