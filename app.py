@@ -100,15 +100,24 @@ def update_meal_status(user_id, doc_id, is_satisfied):
         print(f"更新資料庫狀態失敗: {e}")
 
 def get_recent_meals(user_id):
-    # """只撈取狀態為 confirmed 的歷史紀錄"""
     try:
         meals_ref = db.collection('users').document(user_id).collection('meals')
-        # 加上 where 條件，過濾掉 pending 的資料
         query = meals_ref.where('status', '==', 'confirmed').order_by('timestamp', direction=firestore.Query.DESCENDING).limit(3)
         results = query.stream()
-        # ... (下方程式碼維持不變，將 past_meals 組合起來回傳)
-    except:
-        pass
+        
+        past_meals = []
+        for doc in results:
+            data = doc.to_dict()
+            past_meals.append(data.get('recipe', ''))
+            
+        if not past_meals:
+            return "目前沒有近期飲食紀錄。"
+        return "\n".join(past_meals)
+        
+    except Exception as e:
+        # 絕對不要只寫 pass，一定要把錯誤印出來看！
+        print(f"資料庫查詢發生錯誤: {e}") 
+        return None
 
 def GPT_response(text):
     # 接收回應 (改用 ChatCompletion 寫法)
