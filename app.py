@@ -26,6 +26,7 @@ from firebase_admin import firestore
 
 app = Flask(__name__)
 
+# firebase 資料庫
 firebase_key_path = os.getenv('FIREBASE_KEY_PATH')
 cred = credentials.Certificate(firebase_key_path)
 firebase_admin.initialize_app(cred)
@@ -41,37 +42,73 @@ openai.api_key = os.getenv('OPENAI_API_KEY')
 
 
 
-def save_user_meal(user_id, recipe_result):
-    """將這次生成的食譜寫入資料庫"""
+# def save_user_meal(user_id, recipe_result):
+#     """將這次生成的食譜寫入資料庫"""
+#     try:
+#         # 路徑：users(集合) -> user_id(文件) -> meals(集合) -> 自動產生的ID(文件)
+#         doc_ref = db.collection('users').document(user_id).collection('meals').document()
+#         doc_ref.set({
+#             'recipe': recipe_result,
+#             'timestamp': firestore.SERVER_TIMESTAMP # 讓資料庫自動押上時間
+#         })
+#     except Exception as e:
+#         print(f"寫入資料庫失敗: {e}")
+
+# def get_recent_meals(user_id):
+#     """撈取該使用者最近 3 次的飲食紀錄"""
+#     try:
+#         meals_ref = db.collection('users').document(user_id).collection('meals')
+#         # 依照時間排序（新到舊），只取前 3 筆以節省 Token
+#         query = meals_ref.order_by('timestamp', direction=firestore.Query.DESCENDING).limit(3)
+#         results = query.stream()
+        
+#         past_meals = []
+#         for doc in results:
+#             data = doc.to_dict()
+#             past_meals.append(data.get('recipe', ''))
+            
+#         if not past_meals:
+#             return "目前沒有近期飲食紀錄。"
+#         return "\n".join(past_meals)
+#     except Exception as e:
+#         print(f"讀取資料庫失敗: {e}")
+#         return "無法讀取歷史紀錄。"
+
+def save_pending_meal(user_id, recipe_result):
+    # """先將食譜存入，狀態設為 pending，並回傳這筆資料的 ID"""
     try:
-        # 路徑：users(集合) -> user_id(文件) -> meals(集合) -> 自動產生的ID(文件)
         doc_ref = db.collection('users').document(user_id).collection('meals').document()
         doc_ref.set({
             'recipe': recipe_result,
-            'timestamp': firestore.SERVER_TIMESTAMP # 讓資料庫自動押上時間
+            'status': 'pending', # 新增狀態欄位
+            'timestamp': firestore.SERVER_TIMESTAMP
         })
+        return doc_ref.id # 回傳 ID 給按鈕使用
     except Exception as e:
         print(f"寫入資料庫失敗: {e}")
+        return None
+
+def update_meal_status(user_id, doc_id, is_satisfied):
+    # """根據按鈕點擊結果，更新或刪除該筆紀錄"""
+    try:
+        doc_ref = db.collection('users').document(user_id).collection('meals').document(doc_id)
+        if is_satisfied:
+            doc_ref.update({'status': 'confirmed'})
+        else:
+            doc_ref.delete()
+    except Exception as e:
+        print(f"更新資料庫狀態失敗: {e}")
 
 def get_recent_meals(user_id):
-    """撈取該使用者最近 3 次的飲食紀錄"""
+    # """只撈取狀態為 confirmed 的歷史紀錄"""
     try:
         meals_ref = db.collection('users').document(user_id).collection('meals')
-        # 依照時間排序（新到舊），只取前 3 筆以節省 Token
-        query = meals_ref.order_by('timestamp', direction=firestore.Query.DESCENDING).limit(3)
+        # 加上 where 條件，過濾掉 pending 的資料
+        query = meals_ref.where('status', '==', 'confirmed').order_by('timestamp', direction=firestore.Query.DESCENDING).limit(3)
         results = query.stream()
-        
-        past_meals = []
-        for doc in results:
-            data = doc.to_dict()
-            past_meals.append(data.get('recipe', ''))
-            
-        if not past_meals:
-            return "目前沒有近期飲食紀錄。"
-        return "\n".join(past_meals)
-    except Exception as e:
-        print(f"讀取資料庫失敗: {e}")
-        return "無法讀取歷史紀錄。"
+        # ... (下方程式碼維持不變，將 past_meals 組合起來回傳)
+    except:
+        pass
 
 def GPT_response(text):
     # 接收回應 (改用 ChatCompletion 寫法)
@@ -143,16 +180,29 @@ def handle_image_message(event):
             temperature=0.5
         )
         
-        # 4. 擷取 AI 的回覆並傳送給使用者
         recipe_answer = response['choices'][0]['message']['content']
-        print(f"AI 食譜回應：\n{recipe_answer}")
         
-        line_bot_api.reply_message(
-            event.reply_token, 
-            TextSendMessage(text=recipe_answer)
+        # 1. 先把資料存為 pending，並取得文件 ID
+        doc_id = save_pending_meal(user_id, recipe_answer)
+
+        # 2. 建立滿意度按鈕
+        buttons_template = ButtonsTemplate(
+            text='你對這次的食譜滿意嗎？（滿意才會存入你的飲食記憶喔！）',
+            actions=[
+                # 隱藏資料 data 的格式設計為 "動作&文件ID"
+                PostbackAction(label='滿意', data=f'satisfy&{doc_id}'),
+                PostbackAction(label='不滿意', data=f'unsatisfy&{doc_id}')
+            ]
         )
-        # 5. 將這次的食譜寫入資料庫
-        save_user_meal(user_id, recipe_answer)
+        template_message = TemplateSendMessage(
+            alt_text='請確認食譜滿意度', template=buttons_template
+        )
+        
+        # 3. 同時回傳食譜文字與按鈕
+        line_bot_api.reply_message(event.reply_token, [
+            TextSendMessage(text=recipe_answer), 
+            template_message
+        ])
 
     except Exception as e:
         print(traceback.format_exc())
@@ -179,6 +229,19 @@ def callback():
 
 
 # 處理訊息
+@handler.add(PostbackEvent)
+def handle_postback(event):
+    user_id = event.source.user_id
+    # 切割傳過來的 data，例如 "satisfy&123456" 會變成 action="satisfy", doc_id="123456"
+    action, doc_id = event.postback.data.split('&')
+
+    if action == 'satisfy':
+        update_meal_status(user_id, doc_id, True)
+        line_bot_api.reply_message(event.reply_token, TextSendMessage('太棒了！已經幫您把這道菜存入歷史紀錄。'))
+    elif action == 'unsatisfy':
+        update_meal_status(user_id, doc_id, False)
+        line_bot_api.reply_message(event.reply_token, TextSendMessage('好的，這次的紀錄已取消，期待下次能給您更棒的建議！'))
+
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
     msg = event.message.text
