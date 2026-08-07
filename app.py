@@ -16,6 +16,7 @@ import time
 import traceback
 import base64
 import requests
+import json
 #======python的函數庫==========
 
 # === 新增 Firebase 套件 ===
@@ -139,7 +140,6 @@ def GPT_response(text):
 # 監聽圖片訊息
 @handler.add(MessageEvent, message=ImageMessage)
 def handle_image_message(event):
-    try:
         user_id = event.source.user_id # 取得使用者 ID
         loading_url = "https://api.line.me/v2/bot/chat/loading/start"
         headers = {
@@ -171,16 +171,25 @@ def handle_image_message(event):
             messages=[
                 {
                     "role": "system",
+                    # 注意 JSON 的外層大括號要變成 {{ }} 才能在 f-string 中正常運作
                     "content": f"""你是一位專業的營養師與主廚。
                     【使用者近期飲食紀錄】：\n{past_meals_str}
                     【任務】：
                     1. 根據使用者的近期飲食，判斷缺乏哪些營養素並在這次食譜中優先補足。
-                    2. 嚴格遵守食材搭配的合理性，不應該出現奇怪的搭配。"""
+                    2. 嚴格遵守食材搭配的合理性。
+                    3. 請你「絕對只能」輸出 JSON 格式，不要包含任何其他說明文字（不要加上 markdown 標記），格式如下：
+                    {{
+                      "recipe_name": "菜名",
+                      "style": "日式 / 中式 / 西式",
+                      "category": "肉類料理 / 蔬菜料理 / 海鮮",
+                      "ingredients": ["食材A", "食材B"],
+                      "steps": ["1. 步驟一", "2. 步驟二"]
+                    }}"""
                 },
                 {
                     "role": "user",
                     "content": [
-                        {"type": "text", "text": "請辨識圖片食材，幫我構想 2 道食譜。"},
+                        {"type": "text", "text": "請辨識圖片食材並產出 1 道食譜。"},
                         {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}", "detail": "low"}}
                     ]
                 }
@@ -189,36 +198,44 @@ def handle_image_message(event):
             temperature=0.5
         )
         
-        recipe_answer = response['choices'][0]['message']['content']
+        ai_raw_text = response['choices'][0]['message']['content']
+        print(f"AI 原始回應：\n{ai_raw_text}")
         
-        # 1. 先把資料存為 pending，並取得文件 ID
-        doc_id = save_pending_meal(user_id, recipe_answer)
-
-        # 2. 建立滿意度按鈕
-        buttons_template = ButtonsTemplate(
-            text='您對這次的食譜滿意嗎？（滿意才會存入飲食記憶喔！）',
-            actions=[
-                # 隱藏資料 data 的格式設計為 "動作&文件ID"
-                PostbackAction(label='滿意', data=f'satisfy&{doc_id}'),
-                PostbackAction(label='不滿意', data=f'unsatisfy&{doc_id}')
-            ]
-        )
-        template_message = TemplateSendMessage(
-            alt_text='請確認食譜滿意度', template=buttons_template
-        )
-        
-        # 3. 同時回傳食譜文字與按鈕
-        line_bot_api.reply_message(event.reply_token, [
-            TextSendMessage(text=recipe_answer), 
-            template_message
-        ])
-
-    except Exception as e:
-        print(traceback.format_exc())
-        line_bot_api.reply_message(
-            event.reply_token, 
-            TextSendMessage('抱歉，在處理圖片時發生了一點問題，請稍後再試！')
-        )
+        try:
+            # 預防 AI 加上 ```json 標籤，先將其剃除
+            clean_json_str = ai_raw_text.replace("```json", "").replace("```", "").strip()
+            
+            # 將字串轉換為字典 (Dictionary)
+            recipe_data = json.loads(clean_json_str)
+            
+            # 組合出要傳給使用者的文字 (可以自己排版得漂亮一點)
+            reply_text = f"為您推薦：【{recipe_data['recipe_name']}】\n"
+            reply_text += f"風格：{recipe_data['style']} | {recipe_data['category']}\n\n"
+            reply_text += "🥗 食材：\n" + "、".join(recipe_data['ingredients']) + "\n\n"
+            reply_text += "🍳 步驟：\n" + "\n".join(recipe_data['steps'])
+            
+            # 4. 先將「結構化的字典 (recipe_data)」存入資料庫為 pending 狀態
+            # 注意：這裡原本是存 recipe_answer (純字串)，現在改存 recipe_data (字典)
+            doc_id = save_pending_meal(user_id, recipe_data)
+            
+            text_message = TextSendMessage(
+                # 在食譜最後加上一句問候
+                text=reply_text + "\n\n您對這次的食譜滿意嗎？（滿意才會存入您的飲食記憶喔！）",
+                quick_reply=QuickReply(items=[
+                    QuickReplyButton(action=PostbackAction(label="滿意", data=f"satisfy&{doc_id}")),
+                    QuickReplyButton(action=PostbackAction(label="不滿意", data=f"unsatisfy&{doc_id}"))
+                ])
+            )
+            
+            # 6. 傳送給使用者
+            line_bot_api.reply_message(event.reply_token, text_message)
+            
+        except json.JSONDecodeError as e:
+            print(f"JSON 解析失敗: {e}")
+            line_bot_api.reply_message(
+                event.reply_token, 
+                TextSendMessage('抱歉，小助手剛剛整理食譜格式時出錯了，請再試一次！')
+            )
 
 
 # 監聽所有來自 /callback 的 Post Request
@@ -305,7 +322,7 @@ def handle_postback(event):
 
     if action == 'satisfy':
         update_meal_status(user_id, doc_id, True)
-        line_bot_api.reply_message(event.reply_token, TextSendMessage('太棒了！已經幫您把這道菜存入歷史紀錄~'))
+        line_bot_api.reply_message(event.reply_token, TextSendMessage('太棒了！已經幫您把這道菜存入歷史紀錄。'))
     elif action == 'unsatisfy':
         update_meal_status(user_id, doc_id, False)
         line_bot_api.reply_message(event.reply_token, TextSendMessage('好的，這次的紀錄已取消，期待下次能給您更棒的建議！'))
