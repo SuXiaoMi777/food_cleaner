@@ -187,7 +187,7 @@ def handle_image_message(event):
 
         # 2. 建立滿意度按鈕
         buttons_template = ButtonsTemplate(
-            text='你對這次的食譜滿意嗎？（滿意才會存入你的飲食記憶喔！）',
+            text='您對這次的食譜滿意嗎？（滿意才會存入你的飲食記憶喔！）',
             actions=[
                 # 隱藏資料 data 的格式設計為 "動作&文件ID"
                 PostbackAction(label='滿意', data=f'satisfy&{doc_id}'),
@@ -229,18 +229,6 @@ def callback():
 
 
 # 處理訊息
-@handler.add(PostbackEvent)
-def handle_postback(event):
-    user_id = event.source.user_id
-    # 切割傳過來的 data，例如 "satisfy&123456" 會變成 action="satisfy", doc_id="123456"
-    action, doc_id = event.postback.data.split('&')
-
-    if action == 'satisfy':
-        update_meal_status(user_id, doc_id, True)
-        line_bot_api.reply_message(event.reply_token, TextSendMessage('太棒了！已經幫您把這道菜存入歷史紀錄。'))
-    elif action == 'unsatisfy':
-        update_meal_status(user_id, doc_id, False)
-        line_bot_api.reply_message(event.reply_token, TextSendMessage('好的，這次的紀錄已取消，期待下次能給您更棒的建議！'))
 
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
@@ -272,8 +260,17 @@ def handle_message(event):
         
 
 @handler.add(PostbackEvent)
-def handle_message(event):
-    print(event.postback.data)
+def handle_postback(event):
+    user_id = event.source.user_id
+    # 切割傳過來的 data，例如 "satisfy&123456" 會變成 action="satisfy", doc_id="123456"
+    action, doc_id = event.postback.data.split('&')
+
+    if action == 'satisfy':
+        update_meal_status(user_id, doc_id, True)
+        line_bot_api.reply_message(event.reply_token, TextSendMessage('太棒了！已經幫您把這道菜存入歷史紀錄。'))
+    elif action == 'unsatisfy':
+        update_meal_status(user_id, doc_id, False)
+        line_bot_api.reply_message(event.reply_token, TextSendMessage('好的，這次的紀錄已取消，期待下次能給您更棒的建議！'))
 
 
 @handler.add(MemberJoinedEvent)
