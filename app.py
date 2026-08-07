@@ -236,13 +236,13 @@ def handle_message(event):
     try:
         if msg == "查看歷史菜譜":
             history = get_recent_meals(user_id)
+            print(f"您的近期紀錄如下：\n{history}")
             if history is None:
                 line_bot_api.reply_message(
                 event.reply_token, 
                 TextSendMessage(f"您還未有已儲存菜譜哦")
             )
             else:
-                print(f"您的近期紀錄如下：\n{history}")
                 line_bot_api.reply_message(
                     event.reply_token, 
                     TextSendMessage(f"您的近期紀錄如下：\n{history}")
