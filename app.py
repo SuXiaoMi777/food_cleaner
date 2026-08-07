@@ -187,7 +187,7 @@ def handle_image_message(event):
 
         # 2. 建立滿意度按鈕
         buttons_template = ButtonsTemplate(
-            text='您對這次的食譜滿意嗎？（滿意才會存入你的飲食記憶喔！）',
+            text='您對這次的食譜滿意嗎？（滿意才會存入飲食記憶喔！）',
             actions=[
                 # 隱藏資料 data 的格式設計為 "動作&文件ID"
                 PostbackAction(label='滿意', data=f'satisfy&{doc_id}'),
@@ -229,31 +229,54 @@ def callback():
 
 
 # 處理訊息
-
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
     msg = event.message.text
+    user_id = event.source.user_id # 取得使用者 ID
     try:
-        user_id = event.source.user_id # 取得使用者 ID
-        loading_url = "https://api.line.me/v2/bot/chat/loading/start"
-        headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {os.getenv('CHANNEL_ACCESS_TOKEN')}"
-        }
-        data = {
-            "chatId": user_id,
-            "loadingSeconds": 20 # 動畫顯示秒數 (最高 20)
-        }
-        # 送出請求，使用者的 LINE 畫面會立刻出現「...」動畫
-        requests.post(loading_url, headers=headers, json=data)
+        if msg == "查看歷史菜譜":
+            history = get_recent_meals(user_id)
+            print(f"您的近期紀錄如下：\n{history}")
+            line_bot_api.reply_message(
+                event.reply_token, 
+                TextSendMessage(f"您的近期紀錄如下：\n{history}")
+            )
+            
+        elif msg == "輸入我吃過的東西":
+            print("請直接打字告訴我您今天吃了什麼，或是傳食物照片給我喔！")
+            line_bot_api.reply_message(
+                event.reply_token, 
+                TextSendMessage("請直接打字告訴我您今天吃了什麼，或是傳食物照片給我喔！")
+            )
+            
+        elif msg == "營養分析表":
+            print("營養分析圖表功能正在努力開發中，敬請期待！")
+            line_bot_api.reply_message(
+                event.reply_token, 
+                TextSendMessage("營養分析圖表功能正在努力開發中，敬請期待！")
+            )
+        
+        # 非選單指令交由 model 處理 
+        else:
+            loading_url = "https://api.line.me/v2/bot/chat/loading/start"
+            headers = {
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {os.getenv('CHANNEL_ACCESS_TOKEN')}"
+            }
+            data = {
+                "chatId": user_id,
+                "loadingSeconds": 20 # 動畫顯示秒數 (最高 20)
+            }
+            # 送出請求，使用者的 LINE 畫面會立刻出現「...」動畫
+            requests.post(loading_url, headers=headers, json=data)
 
-        GPT_answer = GPT_response(msg)
-        print(f'AI 回應:{GPT_answer}')
+            GPT_answer = GPT_response(msg)
+            print(f'AI 回應:{GPT_answer}')
 
-        if not GPT_answer or GPT_answer.strip() == "":
-            GPT_answer = "抱歉，我剛剛腦筋一片空白，可以請你再輸入一次嗎？"
+            if not GPT_answer or GPT_answer.strip() == "":
+                GPT_answer = "抱歉，我剛剛腦筋一片空白，可以請你再輸入一次嗎？"
 
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(GPT_answer))
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(GPT_answer))
     except:
         print(traceback.format_exc())
         line_bot_api.reply_message(event.reply_token, TextSendMessage('此服務目前不通...請稍後再試!'))
@@ -267,7 +290,7 @@ def handle_postback(event):
 
     if action == 'satisfy':
         update_meal_status(user_id, doc_id, True)
-        line_bot_api.reply_message(event.reply_token, TextSendMessage('太棒了！已經幫您把這道菜存入歷史紀錄。'))
+        line_bot_api.reply_message(event.reply_token, TextSendMessage('太棒了！已經幫您把這道菜存入歷史紀錄~'))
     elif action == 'unsatisfy':
         update_meal_status(user_id, doc_id, False)
         line_bot_api.reply_message(event.reply_token, TextSendMessage('好的，這次的紀錄已取消，期待下次能給您更棒的建議！'))
