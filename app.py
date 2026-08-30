@@ -278,93 +278,138 @@ def handle_image_message(event):
         # 2. 將二進位圖片資料轉換為 Base64 字串 (OpenAI 接收的格式)
         base64_image = base64.b64encode(image_data).decode('utf-8')
 
-        # 階段一：請 AI「只」辨識食材
-        # ==========================================
-        res_ingredients = openai.ChatCompletion.create(
+        res_vision = openai.ChatCompletion.create(
             model="gpt-4o-mini",
             messages=[
                 {
                     "role": "user",
                     "content": [
-                        {"type": "text", "text": "請仔細觀察這張圖片中，並「只」回傳用空格分隔的食材名稱（如：番茄 雞蛋 蔥）。不要輸出任何其他說明文字。"},
+                        {"type": "text", "text": """請觀察這張圖片，判斷是「生鮮食材」還是「煮好的餐點成品」。
+                            請「絕對只能」回傳 JSON 格式，不要包含 Markdown 標籤：
+                            {
+                            "image_type": "raw", // 生鮮食材填 raw，煮好的成品填 cooked
+                            "items": ["番茄", "雞蛋"] // raw 填食材陣列，cooked 填菜名陣列
+                            }"""},
                         {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}", "detail": "high"}}
                     ]
                 }
             ],
-            temperature=0.0 # 不具備隨機性，只輸出肯定的東西
+            temperature=0.0
         )
-        ingredients_str = res_ingredients['choices'][0]['message']['content'].strip()
-        print(f"辨識出食材：{ingredients_str}")
 
-        user_prefs = get_user_preferences(user_id)
-        cookpad_results = search_cookpad_recipes(ingredients_str)
-        past_meals_str = get_recent_meals(user_id)
+        ai_raw_text = res_vision['choices'][0]['message']['content']
+        clean_json_str = ai_raw_text.replace("```json", "").replace("```", "").strip()
+        ai_result = json.loads(clean_json_str)
+        print(f"辨識出：{ai_result}")
 
-        print(f"參考：{cookpad_results},使用者之前吃過{past_meals_str}")
+        if ai_result.get("image_type") == "raw":
+            # 【生鮮食材流程】：走原本的 Cookpad 搜尋與食譜生成
+            ingredients_str = " ".join(ai_result.get("items", []))
+            cookpad_results = search_cookpad_recipes(ingredients_str)
+            past_meals_str = get_recent_meals(user_id)
+            user_prefs = get_user_preferences(user_id) # 讀取個人飲食設定
 
-        # 3. 將圖片與 Prompt 結合，送給 OpenAI (使用支援視覺的 gpt-4o-mini)
-        response = openai.ChatCompletion.create(
-            model="gpt-4o-mini",
-            messages=[
-                {
-                    "role": "system",
-                    "content": f"""你是一位專業的營養師與主廚，非常了解台灣人吃飯的口味。
-                    【使用者專屬飲食設定】：\n{user_prefs}
-                    【使用者近期飲食紀錄】：\n{past_meals_str}
-                    【使用者現有的食材】：\n{ingredients_str}
-                    【Cookpad 搜尋結果】：\n{cookpad_results}
-                    
-                    【任務】：
-                    1. 核心鐵律：你「必須、絕對要」使用【使用者現有的食材】來作為這道菜的主要材料，但為了搭配合理性可以不用將全部食材用在一道菜！
-                    2. 請嚴格遵守【使用者專屬飲食設定】(避開過敏原、符合其飲食法)在不違反條件下，優先參考【Cookpad 搜尋結果】中的菜名與作法來設計食譜，確保這是一道真實存在且能煮出來的料理，若有參考一定要提供來源。
-                    3. 根據【使用者近期飲食紀錄】：給予合適的搭配與營養考量。
-                    4. 請你「絕對只能」輸出 JSON 格式，不要包含 Markdown 標記，同時應該使用台灣人常用的詞彙(如應該使用「鮭魚」而非「三文魚」)，格式如下：
-                    {{
-                      "recipe_name": "菜名",
-                      "style": "日式 / 中式 / 西式",
-                      "category": "肉類料理 / 蔬菜料理 / 海鮮料理",
-                      "ingredients": ["食材A", "食材B"],
-                      "steps": ["1. 步驟一", "2. 步驟二"],
-                      "source_url": "參考食譜的網址(真的沒有才填無)"
-                    }}"""
-                }
-            ],
-            max_tokens=800,
-            temperature=0.4
-        )
-        
-        ai_raw_text = response['choices'][0]['message']['content']
-        
-        # 4. JSON 解析與排版
-        try:
-            clean_json_str = ai_raw_text.replace("```json", "").replace("```", "").strip()
-            recipe_data = json.loads(clean_json_str)
-            
-            # 排版字串 (加入了來源網址)
-            reply_text = f"為您推薦：【{recipe_data['recipe_name']}】\n"
-            reply_text += f"風格：{recipe_data['style']} | {recipe_data['category']}\n\n"
-            reply_text += "🥗 系統辨識出您有食材：\n" + "、".join(recipe_data['ingredients']) + "\n\n"
-            reply_text += "🍳 步驟：\n" + "\n".join(recipe_data['steps']) + "\n\n"
-            reply_text += f"🔗 參考來源：\n{recipe_data.get('source_url', '無')}"
-            
-            doc_id = save_pending_meal(user_id, recipe_data)
-            
-            text_message = TextSendMessage(
-                text=reply_text + "\n\n您對這次的食譜滿意嗎？滿意才會存入飲食記憶喔！",
-                quick_reply=QuickReply(items=[
-                    QuickReplyButton(action=PostbackAction(label="滿意", data=f"satisfy&{doc_id}")),
-                    QuickReplyButton(action=PostbackAction(label="不滿意", data=f"unsatisfy&{doc_id}"))
-                ])
+            print(f"參考：{cookpad_results},使用者之前吃過{past_meals_str}")
+            response = openai.ChatCompletion.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {
+                        "role": "system",
+                        "content": f"""你是一位專業的營養師與主廚，非常了解台灣人吃飯的口味。
+                        【使用者專屬飲食設定】：\n{user_prefs}
+                        【使用者近期飲食紀錄】：\n{past_meals_str}
+                        【使用者現有的食材】：\n{ingredients_str}
+                        【Cookpad 搜尋結果】：\n{cookpad_results}
+                        
+                        【任務】：
+                        1. 核心鐵律：你「必須、絕對要」使用【使用者現有的食材】來作為這道菜的主要材料，但為了搭配合理性可以不用將全部食材用在一道菜！
+                        2. 請嚴格遵守【使用者專屬飲食設定】(避開過敏原、符合其飲食法)在不違反條件下，優先參考【Cookpad 搜尋結果】中的菜名與作法來設計食譜，確保這是一道真實存在且能煮出來的料理，若有參考一定要提供來源。
+                        3. 根據【使用者近期飲食紀錄】：給予合適的搭配與營養考量。
+                        4. 請你「絕對只能」輸出 JSON 格式，不要包含 Markdown 標記，同時應該使用台灣人常用的詞彙(如應該使用「鮭魚」而非「三文魚」)，格式如下：
+                        {{
+                        "recipe_name": "菜名",
+                        "style": "日式 / 中式 / 西式",
+                        "category": "肉類料理 / 蔬菜料理 / 海鮮料理",
+                        "ingredients": ["食材A", "食材B"],
+                        "steps": ["1. 步驟一", "2. 步驟二"],
+                        "source_url": "參考食譜的網址(真的沒有才填無)"
+                        }}"""
+                    }
+                ],
+                max_tokens=800,
+                temperature=0.4
             )
             
-            line_bot_api.reply_message(event.reply_token, text_message)
+            ai_raw_text = response['choices'][0]['message']['content']
             
-        except json.JSONDecodeError as e:
-            print(f"JSON 解析失敗: {e}\nAI 原始回應: {ai_raw_text}")
-            line_bot_api.reply_message(
-                event.reply_token, 
-                TextSendMessage('抱歉，小助手剛剛整理食譜格式時出錯了，請再試一次！')
+            # 4. JSON 解析與排版
+            try:
+                clean_json_str = ai_raw_text.replace("```json", "").replace("```", "").strip()
+                recipe_data = json.loads(clean_json_str)
+                
+                # 排版字串 (加入了來源網址)
+                reply_text = f"為您推薦：【{recipe_data['recipe_name']}】\n"
+                reply_text += f"風格：{recipe_data['style']} | {recipe_data['category']}\n\n"
+                reply_text += "🥗 系統辨識出您有食材：\n" + "、".join(recipe_data['ingredients']) + "\n\n"
+                reply_text += "🍳 步驟：\n" + "\n".join(recipe_data['steps']) + "\n\n"
+                reply_text += f"🔗 參考來源：\n{recipe_data.get('source_url', '無')}"
+                
+                doc_id = save_pending_meal(user_id, recipe_data)
+                
+                text_message = TextSendMessage(
+                    text=reply_text + "\n\n您對這次的食譜滿意嗎？滿意才會存入飲食記憶喔！",
+                    quick_reply=QuickReply(items=[
+                        QuickReplyButton(action=PostbackAction(label="滿意", data=f"satisfy&{doc_id}")),
+                        QuickReplyButton(action=PostbackAction(label="不滿意", data=f"unsatisfy&{doc_id}"))
+                    ])
+                )
+                
+                line_bot_api.reply_message(event.reply_token, text_message)
+            
+            except json.JSONDecodeError as e:
+                print(f"JSON 解析失敗: {e}\nAI 原始回應: {ai_raw_text}")
+                line_bot_api.reply_message(
+                    event.reply_token, 
+                    TextSendMessage('抱歉，小助手剛剛整理食譜格式時出錯了，請再試一次！')
+                )
+        
+        elif ai_result.get("image_type") == "cooked":
+            # 【餐點成品流程】：進行營養分析並直接記錄
+            meal_name = "、".join(ai_result.get("items", []))
+            
+            res_nutrition = openai.ChatCompletion.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {
+                        "role": "system",
+                        "content": f"""使用者剛吃了【{meal_name}】。請估算營養價值，並「絕對只能」輸出 JSON 格式以相容資料庫：
+                            {{
+                                "recipe_name": "{meal_name}",
+                                "style": "飲食紀錄",
+                                "category": "已食用",
+                                "ingredients": ["(推測包含的食材A)", "(推測包含的食材B)"],
+                                "steps": ["1. 營養小評：(給予一句簡短的營養建議)", "2. 預估熱量：(預估大卡)"],
+                                "source_url": "無"
+                            }}"""
+                    }
+                ],
+                temperature=0.3
             )
+            
+            nutri_raw = res_nutrition['choices'][0]['message']['content']
+            nutri_clean = nutri_raw.replace("```json", "").replace("```", "").strip()
+            nutri_data = json.loads(nutri_clean)
+            
+            # 熟食直接存入資料庫，狀態標記為 confirmed
+            db.collection('users').document(user_id).collection('meals').document().set({
+                'recipe': nutri_data,
+                'status': 'confirmed',
+                'timestamp': firestore.SERVER_TIMESTAMP
+            })
+            
+            # 回傳確認訊息給使用者
+            reply_text = f"已幫您記錄這餐：【{meal_name}】\n\n營養師小點評：\n{nutri_data['steps'][0]}\n{nutri_data['steps'][1]}"
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
 
 
 # 監聽所有來自 /callback 的 Post Request
