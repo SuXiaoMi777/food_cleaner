@@ -76,6 +76,28 @@ openai.api_key = os.getenv('OPENAI_API_KEY')
 #         print(f"讀取資料庫失敗: {e}")
 #         return "無法讀取歷史紀錄。"
 
+def update_user_preferences(user_id, preferences):
+    """將使用者的飲食設定存入資料庫"""
+    try:
+        doc_ref = db.collection('users').document(user_id)
+        # 使用 merge=True 避免覆寫掉原本使用者的其他結構
+        doc_ref.set({'preferences': preferences}, merge=True)
+        return True
+    except Exception as e:
+        print(f"更新設定失敗: {e}")
+        return False
+
+def get_user_preferences(user_id):
+    """讀取使用者的飲食設定"""
+    try:
+        doc = doc_ref = db.collection('users').document(user_id).get()
+        if doc.exists:
+            return doc.to_dict().get('preferences', '無特殊飲食限制')
+        return '無特殊飲食限制'
+    except Exception as e:
+        print(f"讀取設定失敗: {e}")
+        return '無特殊飲食限制'
+
 def create_recipe_flex_message(recipes):
     """將食譜陣列轉換為可左右滑動的 Flex Message 卡片"""
     bubbles = []
@@ -274,6 +296,7 @@ def handle_image_message(event):
         ingredients_str = res_ingredients['choices'][0]['message']['content'].strip()
         print(f"辨識出食材：{ingredients_str}")
 
+        user_prefs = get_user_preferences(user_id)
         cookpad_results = search_cookpad_recipes(ingredients_str)
         past_meals_str = get_recent_meals(user_id)
 
@@ -286,13 +309,14 @@ def handle_image_message(event):
                 {
                     "role": "system",
                     "content": f"""你是一位專業的營養師與主廚，非常了解台灣人吃飯的口味。
+                    【使用者專屬飲食設定】：\n{user_prefs}
                     【使用者近期飲食紀錄】：\n{past_meals_str}
                     【使用者現有的食材】：\n{ingredients_str}
                     【Cookpad 搜尋結果】：\n{cookpad_results}
                     
                     【任務】：
                     1. 核心鐵律：你「必須、絕對要」使用【使用者現有的食材】來作為這道菜的主要材料，但為了搭配合理性可以不用將全部食材用在一道菜！
-                    2. 優先參考【Cookpad 搜尋結果】中的菜名與作法來設計食譜，確保這是一道真實存在且能煮出來的料理，若有參考一定要提供來源。
+                    2. 請嚴格遵守【使用者專屬飲食設定】(避開過敏原、符合其飲食法)在不違反條件下，優先參考【Cookpad 搜尋結果】中的菜名與作法來設計食譜，確保這是一道真實存在且能煮出來的料理，若有參考一定要提供來源。
                     3. 根據【使用者近期飲食紀錄】：給予合適的搭配與營養考量。
                     4. 請你「絕對只能」輸出 JSON 格式，不要包含 Markdown 標記，同時應該使用台灣人常用的詞彙(如應該使用「鮭魚」而非「三文魚」)，格式如下：
                     {{
@@ -379,14 +403,18 @@ def handle_message(event):
                 flex_msg = create_recipe_flex_message(history)
                 line_bot_api.reply_message(event.reply_token, flex_msg)
             
-        elif msg == "輸入我吃過的東西":
-            print("請直接打字告訴我您今天吃了什麼，或是傳食物照片給我喔！")
+        elif msg == "個人飲食設定":
+            reply = "請告訴我您的飲食禁忌或目標！\n(請以「SET:」開頭，例如「SET:不吃海鮮、正在減脂」)"
             line_bot_api.reply_message(
                 event.reply_token, 
-                TextSendMessage("請直接打字告訴我您今天吃了什麼，或是傳食物照片給我喔！")
+                TextSendMessage(reply)
             )
+        elif msg.startswith("SET:"):
+            preferences = msg.replace("SET:", "").strip()
+            update_user_preferences(user_id, preferences)
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(f"好的，已為您記錄專屬設定：【{preferences}"))
             
-        elif msg == "營養分析表":
+        elif msg == "營養價值量表":
             print("營養分析圖表功能正在努力開發中，敬請期待！")
             line_bot_api.reply_message(
                 event.reply_token, 
