@@ -23,6 +23,7 @@ import json
 import firebase_admin
 from firebase_admin import credentials
 from firebase_admin import firestore
+from google.cloud.firestore_v1.base_query import FieldFilter
 #==========================
 
 app = Flask(__name__)
@@ -136,18 +137,35 @@ def search_cookpad_recipes(ingredients_str):
 def get_recent_meals(user_id):
     try:
         meals_ref = db.collection('users').document(user_id).collection('meals')
-        query = meals_ref.where('status', '==', 'confirmed').order_by('timestamp', direction=firestore.Query.DESCENDING).limit(3)
+        query = meals_ref.where(
+                                filter=FieldFilter('status', '==', 'confirmed')).order_by('timestamp', direction=firestore.Query.DESCENDING).limit(3)
         results = query.stream()
         
         past_meals = []
         for doc in results:
             data = doc.to_dict()
-            past_meals.append(data.get('recipe', ''))
+            recipe = data.get('recipe', {})
+        
+        if isinstance(recipe, dict):
+                name = recipe.get('recipe_name', '未知料理')
+                url = recipe.get('source_url', '無')
+                
+                # 組合菜名與連結
+                if url and url != '無':
+                    past_meals.append(f"🍽️ {name}\n🔗 點此看食譜：{url}")
+                else:
+                    past_meals.append(f"🍽️ {name}")
+                    
+            # 兼容舊版：如果撈到的是以前測試存入的純字串
+        elif isinstance(recipe, str):
+                # 只取前 15 個字避免洗版
+                past_meals.append(f"🍽️ 舊紀錄：{recipe[:15]}...")
             
-        if not past_meals:
+        elif not past_meals:
             print("目前沒有近期飲食紀錄。")
-            return "目前沒有近期飲食紀錄。"
-        return "\n".join(past_meals)
+            return None
+        
+        return "\n\n".join(past_meals)
         
     except Exception as e:
         # 絕對不要只寫 pass，一定要把錯誤印出來看！
@@ -225,7 +243,7 @@ def handle_image_message(event):
             messages=[
                 {
                     "role": "system",
-                    "content": f"""你是一位專業的營養師與主廚。
+                    "content": f"""你是一位專業的營養師與主廚，非常了解台灣人吃飯的口味。
                     【使用者近期飲食紀錄】：\n{past_meals_str}
                     【使用者現有的食材】：\n{ingredients_str}
                     【Cookpad 搜尋結果】：\n{cookpad_results}
@@ -233,8 +251,8 @@ def handle_image_message(event):
                     【任務】：
                     1. 核心鐵律：你「必須、絕對要」使用【使用者現有的食材】來作為這道菜的主要材料，但為了搭配合理性可以不用將全部食材用在一道菜！
                     2. 優先參考【Cookpad 搜尋結果】中的菜名與作法來設計食譜，確保這是一道真實存在且能煮出來的料理，若有參考一定要提供來源。
-                    3. 根據【使用者近期飲食紀錄】：給予合適的搭配與營養考量
-                    4. 請你「絕對只能」輸出 JSON 格式，不要包含 Markdown 標記，格式如下：
+                    3. 根據【使用者近期飲食紀錄】：給予合適的搭配與營養考量。
+                    4. 請你「絕對只能」輸出 JSON 格式，不要包含 Markdown 標記，同時應該使用台灣人常用的詞彙(如應該使用「鮭魚」而非「三文魚」)，格式如下：
                     {{
                       "recipe_name": "菜名",
                       "style": "日式 / 中式 / 西式",
