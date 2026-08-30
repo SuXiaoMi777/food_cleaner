@@ -200,19 +200,14 @@ def get_recent_meals(user_id):
             data = doc.to_dict()
             recipe = data.get('recipe', {})
         
-        if isinstance(recipe, dict):
-            past_meals.append(recipe)
-                    
-            # 兼容舊版：如果撈到的是以前測試存入的純字串
-        elif isinstance(recipe, str):
-                # 只取前 15 個字避免洗版
-                past_meals.append(f"🍽️ 舊紀錄：{recipe[:15]}...")
+            if isinstance(recipe, dict):
+                past_meals.append(recipe)
             
-        elif not past_meals:
+        if not past_meals:
             print("目前沒有近期飲食紀錄。")
             return None
         
-        return "\n\n".join(past_meals)
+        return past_meals
         
     except Exception as e:
         # 絕對不要只寫 pass，一定要把錯誤印出來看！
