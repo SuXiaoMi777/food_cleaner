@@ -76,6 +76,48 @@ openai.api_key = os.getenv('OPENAI_API_KEY')
 #         print(f"讀取資料庫失敗: {e}")
 #         return "無法讀取歷史紀錄。"
 
+def process_nutrition_analysis(user_id, doc_id, meal_name, extra_desc=""):
+    """負責將餐點名稱與補充說明送給 AI 分析，並存入資料庫"""
+    try:
+        desc_prompt = f"使用者補充說明：{extra_desc}" if extra_desc else "無補充說明"
+        
+        res_nutrition = openai.ChatCompletion.create(
+            model="gpt-4o-mini",
+            messages=[
+                {
+                    "role": "system",
+                    "content": f"""使用者剛吃了【{meal_name}】。
+                    【{desc_prompt}】
+                    請估算營養價值，並「絕對只能」輸出 JSON 格式以相容資料庫：
+                    {{
+                        "recipe_name": "{meal_name}",
+                        "style": "飲食紀錄",
+                        "category": "已食用",
+                        "ingredients": ["(推測包含的食材A)", "(推測包含的食材B)"],
+                        "steps": ["1. 營養小評：(請結合補充說明，給予簡短建議)", "2. 預估熱量：(預估大卡)"],
+                        "source_url": "無"
+                    }}"""
+                }
+            ],
+            temperature=0.3
+        )
+        
+        nutri_raw = res_nutrition['choices'][0]['message']['content']
+        clean_json_str = nutri_raw.replace("```json", "").replace("```", "").strip()
+        nutri_data = json.loads(clean_json_str)
+        
+        # 覆寫原本 pending 的紀錄，更新為 confirmed 狀態並存入 JSON
+        db.collection('users').document(user_id).collection('meals').document(doc_id).set({
+            'recipe': nutri_data,
+            'status': 'confirmed',
+            'timestamp': firestore.SERVER_TIMESTAMP
+        })
+        
+        return f"已幫您記錄這餐：【{meal_name}】\n\n營養師小點評：\n{nutri_data['steps'][0]}\n{nutri_data['steps'][1]}"
+    except Exception as e:
+        print(f"營養分析失敗：{e}")
+        return "抱歉，分析營養時發生錯誤，請稍後再試。"
+
 def update_user_preferences(user_id, preferences):
     """將使用者的飲食設定存入資料庫"""
     try:
@@ -374,42 +416,31 @@ def handle_image_message(event):
                 )
         
         elif ai_result.get("image_type") == "cooked":
-            # 【餐點成品流程】：進行營養分析並直接記錄
             meal_name = "、".join(ai_result.get("items", []))
             
-            res_nutrition = openai.ChatCompletion.create(
-                model="gpt-4o-mini",
-                messages=[
-                    {
-                        "role": "system",
-                        "content": f"""使用者剛吃了【{meal_name}】。請估算營養價值，並「絕對只能」輸出 JSON 格式以相容資料庫：
-                            {{
-                                "recipe_name": "{meal_name}",
-                                "style": "飲食紀錄",
-                                "category": "已食用",
-                                "ingredients": ["(推測包含的食材A)", "(推測包含的食材B)"],
-                                "steps": ["1. 營養小評：(給予一句簡短的營養建議)", "2. 預估熱量：(預估大卡)"],
-                                "source_url": "無"
-                            }}"""
-                    }
-                ],
-                temperature=0.3
-            )
-            
-            nutri_raw = res_nutrition['choices'][0]['message']['content']
-            nutri_clean = nutri_raw.replace("```json", "").replace("```", "").strip()
-            nutri_data = json.loads(nutri_clean)
-            
-            # 熟食直接存入資料庫，狀態標記為 confirmed
-            db.collection('users').document(user_id).collection('meals').document().set({
-                'recipe': nutri_data,
-                'status': 'confirmed',
+            # 1. 建立一個暫存的餐點紀錄，用來記住這道菜的名字與 ID
+            doc_ref = db.collection('users').document(user_id).collection('meals').document()
+            doc_ref.set({
+                'temp_meal_name': meal_name,
+                'status': 'waiting_for_desc',
                 'timestamp': firestore.SERVER_TIMESTAMP
             })
+            doc_id = doc_ref.id
             
-            # 回傳確認訊息給使用者
-            reply_text = f"已幫您記錄這餐：【{meal_name}】\n\n營養師小點評：\n{nutri_data['steps'][0]}\n{nutri_data['steps'][1]}"
-            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
+            # 2. 更新使用者的「對話狀態標籤」
+            db.collection('users').document(user_id).set({
+                'current_action': 'waiting_for_desc',
+                'pending_meal_id': doc_id
+            }, merge=True)
+            
+            # 3. 傳送詢問訊息與 Quick Reply
+            text_message = TextSendMessage(
+                text=f"看來您吃了【{meal_name}】！\n請問需要補充說明嗎？(例如：我只吃了半份、這是素食)\n\n如果有，請直接打字告訴我；如果不需要，請點擊下方按鈕。",
+                quick_reply=QuickReply(items=[
+                    QuickReplyButton(action=PostbackAction(label="不需要補充", data=f"skip_desc&{doc_id}"))
+                ])
+            )
+            line_bot_api.reply_message(event.reply_token, text_message)
 
 
 # 監聽所有來自 /callback 的 Post Request
@@ -434,6 +465,29 @@ def handle_message(event):
     msg = event.message.text
     user_id = event.source.user_id # 取得使用者 ID
     try:
+        # === 新增：檢查使用者是否處於「等待補充說明」的狀態 ===
+        user_doc = db.collection('users').document(user_id).get()
+        if user_doc.exists:
+            user_data = user_doc.to_dict()
+            if user_data.get('current_action') == 'waiting_for_desc':
+                # 1. 讀取剛剛暫存的餐點名稱
+                pending_doc_id = user_data.get('pending_meal_id')
+                meal_doc = db.collection('users').document(user_id).collection('meals').document(pending_doc_id).get()
+                
+                if meal_doc.exists:
+                    meal_name = meal_doc.to_dict().get('temp_meal_name')
+                    
+                    # 2. 清除使用者的等待狀態 (先清掉避免卡死)
+                    db.collection('users').document(user_id).update({
+                        'current_action': firestore.DELETE_FIELD,
+                        'pending_meal_id': firestore.DELETE_FIELD
+                    })
+                    
+                    # 3. 呼叫分析函式 (將 msg 當作補充說明傳入)
+                    reply_text = process_nutrition_analysis(user_id, pending_doc_id, meal_name, extra_desc=msg)
+                    line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
+                    return # 處理完畢提早結束，不往下跑選單邏輯
+
         if msg == "查看歷史菜譜":
             history = get_recent_meals(user_id)
             print(f"您的近期紀錄如下：\n{history}")
@@ -504,6 +558,21 @@ def handle_postback(event):
     elif action == 'unsatisfy':
         update_meal_status(user_id, doc_id, False)
         line_bot_api.reply_message(event.reply_token, TextSendMessage('好的，這次的紀錄已取消，期待下次能給您更棒的建議！'))
+    elif action == 'skip_desc':
+        # 讀取並分析
+        meal_doc = db.collection('users').document(user_id).collection('meals').document(doc_id).get()
+        if meal_doc.exists:
+            meal_name = meal_doc.to_dict().get('temp_meal_name')
+            
+            # 清除等待狀態
+            db.collection('users').document(user_id).update({
+                'current_action': firestore.DELETE_FIELD,
+                'pending_meal_id': firestore.DELETE_FIELD
+            })
+            
+            # 呼叫分析函式 (不傳入 extra_desc)
+            reply_text = process_nutrition_analysis(user_id, doc_id, meal_name, extra_desc="")
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
 
 
 @handler.add(MemberJoinedEvent)
