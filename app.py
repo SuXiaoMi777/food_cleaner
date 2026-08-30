@@ -76,6 +76,60 @@ openai.api_key = os.getenv('OPENAI_API_KEY')
 #         print(f"讀取資料庫失敗: {e}")
 #         return "無法讀取歷史紀錄。"
 
+def create_recipe_flex_message(recipes):
+    """將食譜陣列轉換為可左右滑動的 Flex Message 卡片"""
+    bubbles = []
+    
+    for recipe in recipes:
+        name = recipe.get('recipe_name', '美味料理')
+        style = recipe.get('style', '家常菜')
+        url = recipe.get('source_url', '')
+        
+        # 決定按鈕的動作 (有網址就開啟網頁，沒網址就傳送提示文字)
+        action = {
+            "type": "uri",
+            "label": "查看食譜",
+            "uri": url
+        } if url and url != '無' else {
+            "type": "message",
+            "label": "無外部連結",
+            "text": f"這道【{name}】是 AI 原創食譜，沒有外部連結喔！"
+        }
+
+        bubble = {
+            "type": "bubble",
+            "size": "micro",
+            "body": {
+                "type": "box",
+                "layout": "vertical",
+                "contents": [
+                    {"type": "text", "text": style, "size": "xs", "color": "#8c8c8c"},
+                    {"type": "text", "text": name, "weight": "bold", "size": "md", "wrap": True}
+                ]
+            },
+            "footer": {
+                "type": "box",
+                "layout": "vertical",
+                "contents": [
+                    {
+                        "type": "button",
+                        "style": "primary",
+                        "color": "#ff7a00",
+                        "action": action
+                    }
+                ]
+            }
+        }
+        bubbles.append(bubble)
+
+    return FlexSendMessage(
+        alt_text="您的歷史菜譜",
+        contents={
+            "type": "carousel",
+            "contents": bubbles
+        }
+    )
+
 def save_pending_meal(user_id, recipe_result):
     # """先將食譜存入，狀態設為 pending，並回傳這筆資料的 ID"""
     try:
@@ -147,14 +201,7 @@ def get_recent_meals(user_id):
             recipe = data.get('recipe', {})
         
         if isinstance(recipe, dict):
-                name = recipe.get('recipe_name', '未知料理')
-                url = recipe.get('source_url', '無')
-                
-                # 組合菜名與連結
-                if url and url != '無':
-                    past_meals.append(f"🍽️ {name}\n🔗 點此看食譜：{url}")
-                else:
-                    past_meals.append(f"🍽️ {name}")
+            past_meals.append(recipe)
                     
             # 兼容舊版：如果撈到的是以前測試存入的純字串
         elif isinstance(recipe, str):
@@ -326,16 +373,16 @@ def handle_message(event):
         if msg == "查看歷史菜譜":
             history = get_recent_meals(user_id)
             print(f"您的近期紀錄如下：\n{history}")
+            
             if history is None:
                 line_bot_api.reply_message(
                 event.reply_token, 
                 TextSendMessage(f"您還未有已儲存菜譜哦")
             )
             else:
-                line_bot_api.reply_message(
-                    event.reply_token, 
-                    TextSendMessage(f"您的近期紀錄如下：\n{history}")
-                )
+                # 呼叫剛剛寫好的 Flex Message 生成器
+                flex_msg = create_recipe_flex_message(history)
+                line_bot_api.reply_message(event.reply_token, flex_msg)
             
         elif msg == "輸入我吃過的東西":
             print("請直接打字告訴我您今天吃了什麼，或是傳食物照片給我喔！")
