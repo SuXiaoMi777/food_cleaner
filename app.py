@@ -86,17 +86,17 @@ def process_nutrition_analysis(user_id, doc_id, meal_name, extra_desc=""):
             messages=[
                 {
                     "role": "system",
-                    "content": f"""使用者剛吃了【{meal_name}】。
-                    【{desc_prompt}】
-                    請估算營養價值，並「絕對只能」輸出 JSON 格式以相容資料庫：
-                    {{
-                        "recipe_name": "{meal_name}",
-                        "style": "飲食紀錄",
-                        "category": "已食用",
-                        "ingredients": ["(推測包含的食材A)", "(推測包含的食材B)"],
-                        "steps": ["1. 營養小評：(請結合補充說明，給予簡短建議)", "2. 預估熱量：(預估大卡)"],
-                        "source_url": "無"
-                    }}"""
+                    "content": f"""使用者原本的餐點辨識為【{meal_name}】。
+【{desc_prompt}】
+請綜合原本的餐點與「補充說明」中的所有食物（務必包含飲料、額外配菜等），重新估算總營養價值，並「絕對只能」輸出 JSON 格式：
+{{
+    "recipe_name": "(請根據補充說明，重新命名這餐的完整名稱，例如：紫米起司雞肉捲與麥芽牛奶)",
+    "style": "飲食紀錄",
+    "category": "已食用",
+    "ingredients": ["(必須包含補充說明提到的所有食材與飲品)"],
+    "steps": ["1. 營養小評：(綜合評估所有食物的營養)", "2. 預估熱量：(預估包含飲料的總大卡)"],
+    "source_url": "無"
+}}"""
                 }
             ],
             temperature=0.3
@@ -106,6 +106,9 @@ def process_nutrition_analysis(user_id, doc_id, meal_name, extra_desc=""):
         clean_json_str = nutri_raw.replace("```json", "").replace("```", "").strip()
         nutri_data = json.loads(clean_json_str)
         
+        # 取得 AI 重新命名的完整餐點名稱
+        final_meal_name = nutri_data.get('recipe_name', meal_name)
+        
         # 覆寫原本 pending 的紀錄，更新為 confirmed 狀態並存入 JSON
         db.collection('users').document(user_id).collection('meals').document(doc_id).set({
             'recipe': nutri_data,
@@ -113,7 +116,8 @@ def process_nutrition_analysis(user_id, doc_id, meal_name, extra_desc=""):
             'timestamp': firestore.SERVER_TIMESTAMP
         })
         
-        return f"已幫您記錄這餐：【{meal_name}】\n\n營養師小點評：\n{nutri_data['steps'][0]}\n{nutri_data['steps'][1]}"
+        # 將回傳文字的變數改為 final_meal_name
+        return f"已幫您記錄這餐：【{final_meal_name}】\n\n營養師小點評：\n{nutri_data['steps'][0]}\n{nutri_data['steps'][1]}"
     except Exception as e:
         print(f"營養分析失敗：{e}")
         return "抱歉，分析營養時發生錯誤，請稍後再試。"
