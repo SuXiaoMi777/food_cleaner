@@ -2,10 +2,8 @@
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <!-- 確保在手機上比例正確 -->
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>我的營養儀表板</title>
-    <!-- 引入開源圖表庫 Chart.js -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
     <style>
@@ -66,58 +64,73 @@
     </div>
 
     <script>
-        // alert("網頁載入中，準備初始化 LIFF...");
-
-        liff.init({
-            liffId: "2011399685-sLgo4oIl"
-        }).then(() => {
-            // alert("1. LIFF 初始化成功！");
-            
+        // 初始化 LIFF
+        liff.init({ liffId: "2011395673-tx0PwnXv" }).then(() => {
             if (liff.isLoggedIn()) {
-                // alert("2. 確認為登入狀態，準備抓取 ID");
-                
                 liff.getProfile().then(profile => {
                     const userId = profile.userId;
-                    // this is a test program
-                    // const userId = "U852ca0872553675ef837bf0b02636f9b"
-                    // alert("3. 成功拿到 ID：" + userId + "，準備呼叫 API");
                     
                     fetch(`/api/nutrition/${userId}`)
                         .then(response => response.json())
                         .then(data => {
-                            // alert("4. 後端 API 回傳成功！資料筆數：" + data.labels.length);
-                            
+                            // 1. 處理過長的標籤文字，超過 6 個字加上 "..."
+                            const shortLabels = data.labels.map(label => 
+                                label.length > 6 ? label.substring(0, 6) + '...' : label
+                            );
+
                             const ctx = document.getElementById('calorieChart').getContext('2d');
                             new Chart(ctx, {
                                 type: 'bar',
                                 data: {
-                                    labels: data.labels,
+                                    labels: shortLabels,
                                     datasets: [{
-                                        label: '預估熱量 (大卡)',
+                                        label: '預估熱量',
                                         data: data.calories,
-                                        backgroundColor: 'rgba(255, 159, 64, 0.6)',
-                                        borderColor: 'rgba(255, 159, 64, 1)',
+                                        backgroundColor: 'rgba(255, 140, 66, 0.7)', // 調整為更溫暖的漸層橘
+                                        borderColor: 'rgba(255, 140, 66, 1)',
                                         borderWidth: 1,
-                                        borderRadius: 4
+                                        borderRadius: 6, // 讓長條圖邊緣變圓滑
+                                        barPercentage: 0.6 // 讓長條圖稍微變細，增加呼吸空間
                                     }]
                                 },
-                                options: { responsive: true, scales: { y: { beginAtZero: true } } }
+                                options: {
+                                    responsive: true,
+                                    maintainAspectRatio: false, // 允許 CSS 控制高度
+                                    plugins: {
+                                        legend: { display: false }, // 隱藏佔空間的圖例
+                                        tooltip: {
+                                            callbacks: {
+                                                // 點擊 Tooltip 時顯示完整的長菜名
+                                                title: function(context) {
+                                                    return data.labels[context[0].dataIndex];
+                                                }
+                                            }
+                                        }
+                                    },
+                                    scales: { 
+                                        x: { 
+                                            grid: { display: false }, // 隱藏 X 軸背景網格線
+                                            ticks: {
+                                                maxRotation: 45,
+                                                minRotation: 45, // 強制字體傾斜 45 度排列整齊
+                                                font: { size: 12, color: '#666' }
+                                            }
+                                        },
+                                        y: { 
+                                            beginAtZero: true,
+                                            grid: { color: '#f0f0f0', drawBorder: false },
+                                            ticks: { font: { size: 12, color: '#999' } }
+                                        }
+                                    }
+                                }
                             });
                         })
-                        .catch(err => {
-                            // alert("X. 後端 API 呼叫失敗：" + err);
-                        });
-                }).catch(err => {
-                    // 正確捕捉 getProfile 的錯誤
-                    // alert("X. 取得 Profile 失敗：" + err); 
+                        .catch(err => console.error("API 呼叫失敗", err));
                 });
             } else {
-                // alert("X. 偵測到未登入，強制跳轉 login");
                 liff.login();
             }
-        })//.catch((err) => {
-            // alert("X. LIFF 初始化失敗：" + err);
-        // });
+        });
     </script>
 </body>
 </html>
