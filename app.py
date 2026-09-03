@@ -620,20 +620,27 @@ def get_nutrition_data(user_id):
         for doc in results:
             data = doc.to_dict()
             recipe = data.get('recipe', {})
+            
+            # 防呆 1：過濾掉舊版純字串資料，只處理新版 JSON 字典
+            if not isinstance(recipe, dict):
+                continue
+                
             name = recipe.get('recipe_name', '未知餐點')
             steps = recipe.get('steps', [])
             
             cal_val = 0
-            if len(steps) > 1:
-                # 使用正規表達式 (Regex) 從 "預估熱量：約 600 大卡" 中把數字 600 抓出來
-                match = re.search(r'\d+', steps[1])
+            # 防呆 2：確保 steps 是陣列
+            if isinstance(steps, list):
+                # 將所有步驟文字合併，避免 AI 把熱量寫在不同行
+                steps_text = " ".join(steps)
+                # 智慧抓取「數字」加上「大卡/卡/kcal」的組合
+                match = re.search(r'(\d+)\s*(?:大卡|卡|kcal)', steps_text, re.IGNORECASE)
                 if match:
-                    cal_val = int(match.group())
+                    cal_val = int(match.group(1))
             
             labels.append(name)
             calories.append(cal_val)
             
-        # 因為抓出來是新到舊，反轉陣列讓圖表顯示由舊到新（時間序）
         labels.reverse()
         calories.reverse()
         
