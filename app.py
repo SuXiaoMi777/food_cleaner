@@ -93,16 +93,16 @@ def process_nutrition_analysis(user_id, doc_id, meal_name, extra_desc=""):
                 {
                     "role": "system",
                     "content": f"""使用者原本的餐點辨識為【{meal_name}】。
-【{desc_prompt}】
-請綜合原本的餐點與「補充說明」中的所有食物（務必包含飲料、額外配菜等），重新估算總營養價值，並「絕對只能」輸出 JSON 格式：
-{{
-    "recipe_name": "(請根據補充說明，重新命名這餐的完整名稱，例如：紫米起司雞肉捲與麥芽牛奶)",
-    "style": "飲食紀錄",
-    "category": "已食用",
-    "ingredients": ["(必須包含補充說明提到的所有食材與飲品)"],
-    "steps": ["1. 營養小評：(綜合評估所有食物的營養)", "2. 預估熱量：(預估包含飲料的總大卡)"],
-    "source_url": "無"
-}}"""
+                    【{desc_prompt}】請綜合原本的餐點與「補充說明」中的所有食物（務必包含飲料、額外配菜等），重新估算總營養價值，並「絕對只能」輸出 JSON 格式：
+                    {{
+                        "recipe_name": "(請根據補充說明，重新命名這餐的完整名稱，例如：紫米起司雞肉捲與麥芽牛奶)",
+                        "style": "飲食紀錄",
+                        "category": "已食用",
+                        "ingredients": ["(必須包含補充說明提到的所有食材與飲品)"],
+                        "steps": ["1. 營養小評：(綜合評估所有食物的營養)", "2. 預估熱量：(預估包含飲料的總大卡)"],
+                        "calories": 預估總熱量數字(必須是整數，例如: 650),
+                        "source_url": "無"
+                    }}"""
                 }
             ],
             temperature=0.3
@@ -384,6 +384,7 @@ def handle_image_message(event):
                         "category": "肉類料理 / 蔬菜料理 / 海鮮料理",
                         "ingredients": ["食材A", "食材B"],
                         "steps": ["1. 步驟一", "2. 步驟二"],
+                        "calories": 預估熱量數字(必須是整數，例如: 600),
                         "source_url": "參考食譜的網址(真的沒有才填無)"
                         }}"""
                     }
