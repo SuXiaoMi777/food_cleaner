@@ -597,10 +597,10 @@ def welcome(event):
 
 # 營養分析量表
 # 1. 負責顯示網頁的路由
-@app.route('/dashboard/<user_id>')
-def dashboard(user_id):
+@app.route('/dashboard')
+def dashboard():
     # 當使用者點開網址，回傳一個 HTML 網頁，並把 user_id 傳進去
-    return render_template('dashboard.html', user_id=user_id)
+    return render_template('dashboard.html')
 
 # 2. 負責提供圖表數據的 API
 @app.route('/api/nutrition/<user_id>')

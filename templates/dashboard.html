@@ -20,34 +20,45 @@
     </div>
 
     <script>
-        // 從網址中取得 Python 傳過來的 user_id
-        const userId = "{{ user_id }}";
-        
-        // 向我們剛剛寫好的 Python API 請求資料
-        fetch(`/api/nutrition/${userId}`)
-            .then(response => response.json())
-            .then(data => {
-                const ctx = document.getElementById('calorieChart').getContext('2d');
-                new Chart(ctx, {
-                    type: 'bar', // 也可以改成 'line' 看折線圖
-                    data: {
-                        labels: data.labels, // 菜名
-                        datasets: [{
-                            label: '預估熱量 (大卡)',
-                            data: data.calories, // 數字
-                            backgroundColor: 'rgba(255, 159, 64, 0.6)',
-                            borderColor: 'rgba(255, 159, 64, 1)',
-                            borderWidth: 1,
-                            borderRadius: 4
-                        }]
-                    },
-                    options: {
-                        responsive: true,
-                        scales: { y: { beginAtZero: true } }
+        // 1. 初始化 LIFF
+        liff.init({
+            liffId: "2011395673-tx0PwnXv" // 例如 "1234567890-abcdefgh"
+                }).then(() => {
+                    if (liff.isLoggedIn()) {
+                        // 2. 成功登入後，自動抓取使用者的 LINE ID
+                        liff.getProfile().then(profile => {
+                            const userId = profile.userId;
+                            
+                            // 3. 拿著真實的 userId 去跟 Python 後端要圖表資料
+                            fetch(`/api/nutrition/${userId}`)
+                                .then(response => response.json())
+                                .then(data => {
+                                    const ctx = document.getElementById('calorieChart').getContext('2d');
+                                    new Chart(ctx, {
+                                        type: 'bar',
+                                        data: {
+                                            labels: data.labels,
+                                            datasets: [{
+                                                label: '預估熱量 (大卡)',
+                                                data: data.calories,
+                                                backgroundColor: 'rgba(255, 159, 64, 0.6)',
+                                                borderColor: 'rgba(255, 159, 64, 1)',
+                                                borderWidth: 1,
+                                                borderRadius: 4
+                                            }]
+                                        },
+                                        options: { responsive: true, scales: { y: { beginAtZero: true } } }
+                                    });
+                                })
+                                .catch(err => console.error("圖表載入失敗", err));
+                        });
+                    } else {
+                        // 如果沒有登入，強制跳轉到 LINE 登入畫面
+                        liff.login();
                     }
-                });
-            })
-            .catch(err => console.error("圖表載入失敗", err));
+                }).catch((err) => {
+                    console.error("LIFF 初始化失敗", err);
+            });
     </script>
 </body>
 </html>
