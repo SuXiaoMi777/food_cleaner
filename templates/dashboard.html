@@ -9,38 +9,83 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
     <style>
-        body { font-family: 'Helvetica Neue', Arial, sans-serif; padding: 20px; background-color: #f4f6f9; }
-        .card { background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
-        h2 { text-align: center; color: #333; }
+        body { 
+            font-family: 'Helvetica Neue', Arial, 'PingFang TC', 'Microsoft JhengHei', sans-serif; 
+            padding: 20px 15px; 
+            margin: 0;
+            background: linear-gradient(135deg, #f6f8fb 0%, #e5ebf4 100%);
+            min-height: 100vh;
+        }
+        .header {
+            text-align: center;
+            margin-bottom: 24px;
+        }
+        .header h1 {
+            font-size: 22px;
+            color: #333;
+            margin: 0 0 4px 0;
+            letter-spacing: 1px;
+        }
+        .header p {
+            font-size: 13px;
+            color: #777;
+            margin: 0;
+        }
+        .card { 
+            background: #ffffff; 
+            padding: 24px 16px; 
+            border-radius: 20px; 
+            box-shadow: 0 8px 24px rgba(0,0,0,0.06); 
+        }
+        .card h2 { 
+            text-align: center; 
+            color: #444; 
+            font-size: 16px;
+            margin-top: 0;
+            margin-bottom: 20px;
+        }
+        /* 固定圖表容器高度，避免手機版過度壓縮 */
+        .chart-container {
+            position: relative;
+            height: 320px;
+            width: 100%;
+        }
     </style>
 </head>
 <body>
+    <div class="header">
+        <h1>🥗 飲食健康總覽</h1>
+        <p>為您掌握近期的熱量攝取狀況</p>
+    </div>
+    
     <div class="card">
-        <h2>近期熱量攝取趨勢</h2>
-        <canvas id="calorieChart"></canvas>
+        <h2>近期熱量攝取趨勢 (大卡)</h2>
+        <div class="chart-container">
+            <canvas id="calorieChart"></canvas>
+        </div>
     </div>
 
     <script>
-        alert("網頁載入中，準備初始化 LIFF...");
+        // alert("網頁載入中，準備初始化 LIFF...");
 
         liff.init({
             liffId: "2011399685-sLgo4oIl"
         }).then(() => {
-            alert("1. LIFF 初始化成功！");
+            // alert("1. LIFF 初始化成功！");
             
             if (liff.isLoggedIn()) {
-                alert("2. 確認為登入狀態，準備抓取 ID");
+                // alert("2. 確認為登入狀態，準備抓取 ID");
                 
                 liff.getProfile().then(profile => {
                     const userId = profile.userId;
                     // this is a test program
                     // const userId = "U852ca0872553675ef837bf0b02636f9b"
-                    alert("3. 成功拿到 ID：" + userId + "，準備呼叫 API");
+                    // alert("3. 成功拿到 ID：" + userId + "，準備呼叫 API");
                     
                     fetch(`/api/nutrition/${userId}`)
                         .then(response => response.json())
                         .then(data => {
-                            alert("4. 後端 API 回傳成功！資料筆數：" + data.labels.length);
+                            // alert("4. 後端 API 回傳成功！資料筆數：" + data.labels.length);
                             
                             const ctx = document.getElementById('calorieChart').getContext('2d');
                             new Chart(ctx, {
@@ -60,19 +105,19 @@
                             });
                         })
                         .catch(err => {
-                            alert("X. 後端 API 呼叫失敗：" + err);
+                            // alert("X. 後端 API 呼叫失敗：" + err);
                         });
                 }).catch(err => {
                     // 正確捕捉 getProfile 的錯誤
-                    alert("X. 取得 Profile 失敗：" + err); 
+                    // alert("X. 取得 Profile 失敗：" + err); 
                 });
             } else {
-                alert("X. 偵測到未登入，強制跳轉 login");
+                // alert("X. 偵測到未登入，強制跳轉 login");
                 liff.login();
             }
-        }).catch((err) => {
-            alert("X. LIFF 初始化失敗：" + err);
-        });
+        })//.catch((err) => {
+            // alert("X. LIFF 初始化失敗：" + err);
+        // });
     </script>
 </body>
 </html>
