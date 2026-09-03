@@ -99,7 +99,7 @@ def process_nutrition_analysis(user_id, doc_id, meal_name, extra_desc=""):
                         "style": "飲食紀錄",
                         "category": "使用者自行上傳",
                         "ingredients": ["(必須包含補充說明提到的所有食材與飲品)"],
-                        "steps": ["1. 營養小評：(綜合評估所有食物的營養)", "2. 預估熱量：(預估包含飲料的總大卡)"],
+                        "steps": ["1. 營養小評：請在此直接寫出你的評估內容，不要照抄括號提示", "2. 熱量說明：請簡述你預估的熱量依據"],
                         "calories": 預估總熱量數字(必須是整數，例如: 650),
                         "source_url": "無"
                     }}"""
@@ -627,48 +627,43 @@ def get_nutrition_data(user_id):
             doc_count += 1
             data = doc.to_dict()
             print(f"\n--- [文件 {doc_count}] ID: {doc.id} ---")
-            print(f"原始資料: {data}")
             
             recipe = data.get('recipe', {})
             if not isinstance(recipe, dict):
-                print("❌ 略過：這筆資料的 recipe 不是字典 (可能是舊版純文字)")
+                print("❌ 略過：不是字典")
                 continue
                 
             name = recipe.get('recipe_name', '未知餐點')
-            steps = recipe.get('steps', [])
             
-            cal_val = 0
-            if isinstance(steps, list):
-                steps_text = " ".join(steps)
-                print(f"待分析文字: {steps_text}")
-                
-                match = re.search(r'(\d+)\s*(?:大卡|卡|kcal)', steps_text, re.IGNORECASE)
-                if match:
-                    cal_val = int(match.group(1))
-                    print(f"✅ 成功抓出熱量數字: {cal_val}")
-                else:
-                    print("⚠️ 警告：無法從文字中找到熱量數值")
+            # 優先從資料庫直接抓取 calories 整數欄位
+            cal_val = recipe.get('calories')
+            
+            # 如果抓不到（舊版資料），才啟用相容模式去掃描文字
+            if cal_val is None:
+                cal_val = 0
+                steps = recipe.get('steps', [])
+                if isinstance(steps, list):
+                    steps_text = " ".join(steps)
+                    match = re.search(r'(\d+)\s*(?:大卡|卡|kcal)', steps_text, re.IGNORECASE)
+                    if match:
+                        cal_val = int(match.group(1))
+                        print(f"✅ 成功從 steps 抓出熱量: {cal_val}")
+                    else:
+                        print("⚠️ 警告：無法從文字中找到熱量")
             else:
-                 print("⚠️ 警告：steps 不是陣列格式")
+                print(f"✅ 成功從 calories 欄位讀取: {cal_val}")
             
             labels.append(name)
             calories.append(cal_val)
             
         print(f"\n========== 抓取結束 ==========")
-        print(f"總共掃描文件數: {doc_count}")
-        print(f"最終回傳 labels: {labels}")
-        print(f"最終回傳 calories: {calories}\n")
-        
         labels.reverse()
         calories.reverse()
         
         return jsonify({"labels": labels, "calories": calories})
     except Exception as e:
         print(f"❌ 取得圖表資料發生崩潰：{e}")
-        import traceback
-        print(traceback.format_exc())
         return jsonify({"labels": [], "calories": []})
-
 
         
 import os
