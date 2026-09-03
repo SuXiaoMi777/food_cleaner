@@ -24,7 +24,7 @@
         alert("網頁載入中，準備初始化 LIFF...");
 
         liff.init({
-            liffId: "2011395673-tx0PwnXv"
+            liffId: "2011399685-sLgo4oIl"
         }).then(() => {
             alert("1. LIFF 初始化成功！");
             
@@ -32,9 +32,9 @@
                 alert("2. 確認為登入狀態，準備抓取 ID");
                 
                 liff.getProfile().then(profile => {
-                    // const userId = profile.userId;
+                    const userId = profile.userId;
                     // this is a test program
-                    const userId = "U852ca0872553675ef837bf0b02636f9b"
+                    // const userId = "U852ca0872553675ef837bf0b02636f9b"
                     alert("3. 成功拿到 ID：" + userId + "，準備呼叫 API");
                     
                     fetch(`/api/nutrition/${userId}`)
