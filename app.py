@@ -229,7 +229,7 @@ def update_meal_status(user_id, doc_id, is_satisfied):
     except Exception as e:
         print(f"更新資料庫狀態失敗: {e}")
 
-def search_cookpad_recipes(ingredients_str):
+def search_cookpad_recipes(ingredients_list):
     """利用 Google Custom Search API 搜尋 Cookpad 網站的真實食譜"""
     api_key = os.getenv('GOOGLE_SEARCH_API_KEY')
     cx = os.getenv('GOOGLE_SEARCH_CX')
@@ -239,28 +239,30 @@ def search_cookpad_recipes(ingredients_str):
         return "無網路搜尋結果"
 
     url = "https://www.googleapis.com/customsearch/v1"
-    params = {
-        'key': api_key,
-        'cx': cx,
-        'q': ingredients_str, # 搜尋關鍵字 (例如: 番茄 雞蛋)
-        'num': 3 # 抓取最相關的前 3 筆即可
-    }
-    
-    try:
-        response = requests.get(url, params=params)
-        data = response.json()
-        items = data.get('items', [])
-        
-        if not items:
-            return "查無相關食譜"
+    for ingredient in ingredients_list:
+        params = {
+            'key': api_key,
+            'cx': cx,
+            'q': ingredient, # 每次只搜一個食材
+            'num': 3
+        }
+        try:
+            response = requests.get(url, params=params)
+            data = response.json()
+            items = data.get('items', [])
             
-        search_results = ""
-        for i, item in enumerate(items):
-            search_results += f"【參考食譜 {i+1}】\n菜名：{item.get('title')}\n網址：{item.get('link')}\n\n"
-        return search_results
-    except Exception as e:
-        print(f"Google 搜尋發生錯誤: {e}")
-        return "搜尋功能異常"
+            # 若找到結果，立刻組合字串並 return 結束迴圈
+            if items:
+                search_results = f"基於核心食材「{ingredient}」的搜尋結果：\n"
+                for i, item in enumerate(items):
+                    search_results += f"【參考食譜{i+1}】\n菜名：{item.get('title')}\n網址：{item.get('link')}\n\n"
+                return search_results
+                
+        except Exception as e:
+            print(f"Google 搜尋發生錯誤：{e}")
+            
+    return "查無相關食譜"
+            
 
 def get_recent_meals(user_id):
     try:
@@ -337,7 +339,7 @@ def handle_image_message(event):
                     "role": "user",
                     "content": [
                         {"type": "text", "text": """請觀察這張圖片，判斷是「生鮮食材」還是「煮好的餐點成品」。
-                            請「絕對只能」回傳 JSON 格式，不要包含 Markdown 標籤：
+                            請「絕對只能」回傳 JSON 格式，不要包含 Markdown 標籤，同時只能輸出圖片中有的食材，絕對不應出現圖片中沒有的食材：
                             {
                             "image_type": "raw", // 生鮮食材填 raw，煮好的成品填 cooked
                             "items": ["番茄", "雞蛋"] // raw 填食材陣列，cooked 填菜名陣列
@@ -356,8 +358,9 @@ def handle_image_message(event):
 
         if ai_result.get("image_type") == "raw":
             # 【生鮮食材流程】：走原本的 Cookpad 搜尋與食譜生成
-            ingredients_str = " ".join(ai_result.get("items", []))
-            cookpad_results = search_cookpad_recipes(ingredients_str)
+            ingredients_list = ai_result.get("items", [])
+            cookpad_results = search_cookpad_recipes(ingredients_list)
+            ingredients_str = "、".join(ingredients_list)
             past_meals_str = get_recent_meals(user_id)
             user_prefs = get_user_preferences(user_id) # 讀取個人飲食設定
 
@@ -374,7 +377,7 @@ def handle_image_message(event):
                         【Cookpad 搜尋結果】：\n{cookpad_results}
                         
                         【任務】：
-                        1. 核心鐵律：你「必須、絕對要」使用【使用者現有的食材】來作為這道菜的主要材料，但為了搭配合理性可以不用將全部食材用完！(例如食材有空心菜、雞蛋、蔥，應建議蒜香炒空心菜 or 蔥香烘蛋，絕對不要出現空心菜炒蛋這種奇怪的搭配)
+                        1. 核心鐵律：你「必須、絕對要」使用【使用者現有的食材】來作為這道菜的主要材料，但為了搭配合理性可以不用將全部食材用完！(此 case 為假設，不一定代表真實情況：食材有空心菜、雞蛋、蔥，應建議"炒空心菜" 或是 "蔥香烘蛋"擇一，絕對不要出現空心菜炒蛋這種奇怪的搭配)
                         2. 請嚴格遵守【使用者專屬飲食設定】(避開過敏原、符合其飲食法)在不違反條件下，優先參考【Cookpad 搜尋結果】中的菜名與作法來設計食譜，確保這是一道真實存在且能煮出來的料理，若有參考一定要提供來源。
                         3. 根據【使用者近期飲食紀錄】：給予合適的搭配與營養考量。
                         4. 請你「絕對只能」輸出 JSON 格式，不要包含 Markdown 標記，同時應該使用台灣人常用的詞彙(如應該使用「鮭魚」而非「三文魚」)，格式如下：
