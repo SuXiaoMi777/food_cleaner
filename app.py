@@ -596,6 +596,9 @@ def welcome(event):
 
 
 # 營養分析量表
+@app.route('/')
+def home():
+    return "Bot is running!"
 # 1. 負責顯示網頁的路由
 @app.route('/dashboard')
 def dashboard():
