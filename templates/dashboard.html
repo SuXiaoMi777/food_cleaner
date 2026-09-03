@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <!-- 確保在手機上比例正確 -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>我的營養儀表板</title>
+    <!-- 引入開源圖表庫 Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body { font-family: 'Helvetica Neue', Arial, sans-serif; padding: 20px; background-color: #f4f6f9; }
+        .card { background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        h2 { text-align: center; color: #333; }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <h2>近期熱量攝取趨勢</h2>
+        <canvas id="calorieChart"></canvas>
+    </div>
+
+    <script>
+        // 從網址中取得 Python 傳過來的 user_id
+        const userId = "{{ user_id }}";
+        
+        // 向我們剛剛寫好的 Python API 請求資料
+        fetch(`/api/nutrition/${userId}`)
+            .then(response => response.json())
+            .then(data => {
+                const ctx = document.getElementById('calorieChart').getContext('2d');
+                new Chart(ctx, {
+                    type: 'bar', // 也可以改成 'line' 看折線圖
+                    data: {
+                        labels: data.labels, // 菜名
+                        datasets: [{
+                            label: '預估熱量 (大卡)',
+                            data: data.calories, // 數字
+                            backgroundColor: 'rgba(255, 159, 64, 0.6)',
+                            borderColor: 'rgba(255, 159, 64, 1)',
+                            borderWidth: 1,
+                            borderRadius: 4
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        scales: { y: { beginAtZero: true } }
+                    }
+                });
+            })
+            .catch(err => console.error("圖表載入失敗", err));
+    </script>
+</body>
+</html>

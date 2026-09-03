@@ -8,7 +8,7 @@ from linebot.exceptions import (
 )
 from linebot.models import *
 
-#======python的函數庫==========
+#======python 函數庫==========
 import tempfile, os
 import datetime
 import openai
@@ -17,12 +17,18 @@ import traceback
 import base64
 import requests
 import json
-#======python的函數庫==========
+#======python 函數庫==========
 
-# === 新增 Firebase 套件 ===
+#======Firebase 套件======
 import firebase_admin
 from firebase_admin import credentials
 from firebase_admin import firestore
+from google.cloud.firestore_v1.base_query import FieldFilter
+#==========================
+
+#========網頁套件=========
+from flask import Flask, request, abort, render_template, jsonify
+import re
 from google.cloud.firestore_v1.base_query import FieldFilter
 #==========================
 
@@ -587,7 +593,53 @@ def welcome(event):
     name = profile.display_name
     message = TextSendMessage(text=f'{name}歡迎加入')
     line_bot_api.reply_message(event.reply_token, message)
+
+
+# 營養分析量表
+# 1. 負責顯示網頁的路由
+@app.route('/dashboard/<user_id>')
+def dashboard(user_id):
+    # 當使用者點開網址，回傳一個 HTML 網頁，並把 user_id 傳進去
+    return render_template('dashboard.html', user_id=user_id)
+
+# 2. 負責提供圖表數據的 API
+@app.route('/api/nutrition/<user_id>')
+def get_nutrition_data(user_id):
+    try:
+        meals_ref = db.collection('users').document(user_id).collection('meals')
+        # 抓取最近 10 筆已確認的紀錄
+        query = meals_ref.where(filter=FieldFilter('status', '==', 'confirmed')).order_by('timestamp', direction=firestore.Query.DESCENDING).limit(10)
+        results = query.stream()
         
+        labels = []
+        calories = []
+        
+        for doc in results:
+            data = doc.to_dict()
+            recipe = data.get('recipe', {})
+            name = recipe.get('recipe_name', '未知餐點')
+            steps = recipe.get('steps', [])
+            
+            cal_val = 0
+            if len(steps) > 1:
+                # 使用正規表達式 (Regex) 從 "預估熱量：約 600 大卡" 中把數字 600 抓出來
+                match = re.search(r'\d+', steps[1])
+                if match:
+                    cal_val = int(match.group())
+            
+            labels.append(name)
+            calories.append(cal_val)
+            
+        # 因為抓出來是新到舊，反轉陣列讓圖表顯示由舊到新（時間序）
+        labels.reverse()
+        calories.reverse()
+        
+        return jsonify({"labels": labels, "calories": calories})
+    except Exception as e:
+        print(f"取得圖表資料失敗：{e}")
+        return jsonify({"labels": [], "calories": []})
+
+
         
 import os
 if __name__ == "__main__":
