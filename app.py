@@ -609,44 +609,59 @@ def dashboard():
 @app.route('/api/nutrition/<user_id>')
 def get_nutrition_data(user_id):
     try:
+        print(f"========== 開始抓取圖表資料 (User: {user_id}) ==========")
         meals_ref = db.collection('users').document(user_id).collection('meals')
-        # 抓取最近 10 筆已確認的紀錄
         query = meals_ref.where(filter=FieldFilter('status', '==', 'confirmed')).order_by('timestamp', direction=firestore.Query.DESCENDING).limit(10)
         results = query.stream()
         
         labels = []
         calories = []
+        doc_count = 0
         
         for doc in results:
+            doc_count += 1
             data = doc.to_dict()
-            recipe = data.get('recipe', {})
+            print(f"\n--- [文件 {doc_count}] ID: {doc.id} ---")
+            print(f"原始資料: {data}")
             
-            # 防呆 1：過濾掉舊版純字串資料，只處理新版 JSON 字典
+            recipe = data.get('recipe', {})
             if not isinstance(recipe, dict):
+                print("❌ 略過：這筆資料的 recipe 不是字典 (可能是舊版純文字)")
                 continue
                 
             name = recipe.get('recipe_name', '未知餐點')
             steps = recipe.get('steps', [])
             
             cal_val = 0
-            # 防呆 2：確保 steps 是陣列
             if isinstance(steps, list):
-                # 將所有步驟文字合併，避免 AI 把熱量寫在不同行
                 steps_text = " ".join(steps)
-                # 智慧抓取「數字」加上「大卡/卡/kcal」的組合
+                print(f"待分析文字: {steps_text}")
+                
                 match = re.search(r'(\d+)\s*(?:大卡|卡|kcal)', steps_text, re.IGNORECASE)
                 if match:
                     cal_val = int(match.group(1))
+                    print(f"✅ 成功抓出熱量數字: {cal_val}")
+                else:
+                    print("⚠️ 警告：無法從文字中找到熱量數值")
+            else:
+                 print("⚠️ 警告：steps 不是陣列格式")
             
             labels.append(name)
             calories.append(cal_val)
             
+        print(f"\n========== 抓取結束 ==========")
+        print(f"總共掃描文件數: {doc_count}")
+        print(f"最終回傳 labels: {labels}")
+        print(f"最終回傳 calories: {calories}\n")
+        
         labels.reverse()
         calories.reverse()
         
         return jsonify({"labels": labels, "calories": calories})
     except Exception as e:
-        print(f"取得圖表資料失敗：{e}")
+        print(f"❌ 取得圖表資料發生崩潰：{e}")
+        import traceback
+        print(traceback.format_exc())
         return jsonify({"labels": [], "calories": []})
 
 
